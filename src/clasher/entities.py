@@ -1,152 +1,78 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from enum import Enum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .battle import BattleState
-
-from .arena import Position
-from .card_types import CardStatsCompat, Mechanic
-from .factory.dynamic_factory import troop_from_character_data, troop_from_values
+from card_utils import Card
+import math
+from .battle import BattleState
+from .arena import Position, TileGrid
 
 
-class EntityType(Enum):
-    TROOP = "troop"
-    BUILDING = "building"
-    PROJECTILE = "projectile"
-    AURA = "aura"
+class Entity:
+    def __init__(self, id, position, player, card_name, mechanics):
+        self.id, self.position, self.player, self.card_name, self.mechanics = \
+            id, position, player, card_name, mechanics
+        self.data = Card(self.card_name)
+        self.tower_active = False # This attribute only works with KingTowers
+        self.is_alive = True
+        self.stun_timer = 0.0
+        self.slow_timer = 0.0
+        self.slow_multiplier = 1.0
+        self.attack_speed_buff = 1.0
+        self.attack_speed_debuff = 1.0
+        self.attack_cooldown = 0
+        self.speed = self.data.speed
+        for each in self.mechanics:
+            each.on_attach(self)
 
-
-class TargetType(Enum):
-    GROUND = "ground"
-    AIR = "air" 
-    BOTH = "both"
-
-
-@dataclass
-class Entity(ABC):
-    id: int
-    position: Position
-    player_id: int
-    card_stats: CardStatsCompat
-    
-    # Combat stats
-    hitpoints: float
-    max_hitpoints: float
-    damage: float
-    range: float
-    sight_range: float
-    
-    # Timing
-    attack_cooldown: float = 0.0
-    load_time: float = 0.0
-    deploy_delay_remaining: float = 0.0
-    
-    # State
-    target_id: Optional[int] = None
-    is_alive: bool = True
-    is_air_unit: bool = False  # True for flying troops like Minions, Balloon, Dragon
-    
-    # Status effects
-    stun_timer: float = 0.0
-    slow_timer: float = 0.0
-    slow_multiplier: float = 1.0
-    original_speed: Optional[float] = None
-    attack_speed_debuff_multiplier: float = 1.0
-    attack_speed_buff_multiplier: float = 1.0
-    last_attack_time: float = 0.0  # For visualization tracking
-
-    # Mechanics system
-    mechanics: List[Mechanic] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        if self.max_hitpoints == 0:
-            self.max_hitpoints = self.hitpoints
-        # Call on_attach for all mechanics
-        for mechanic in self.mechanics:
-            mechanic.on_attach(self)
-    
-    @abstractmethod
-    def update(self, dt: float, battle_state: 'BattleState') -> None:
-        """Update entity state each tick"""
-        pass
-    
-    def take_damage(self, amount: float) -> None:
+    def update(self, dt: float, battle_state): raise NotImplementedError
+    def take_damage(self, amount: float):
         """Apply damage to entity"""
-        for mechanic in getattr(self, "mechanics", []):
+        for mechanic in self.mechanics:
             guard = getattr(mechanic, "take_damage_during_dash", None)
             if callable(guard):
                 should_take_damage = guard(self, amount)
                 if not should_take_damage:
                     return
 
-        # King tower activation when hit directly.
-        if type(self).__name__ == "Building" and getattr(getattr(self, "card_stats", None), "name", None) == "KingTower":
-            if amount > 0:
-                self._tower_active = True
-        self.hitpoints = max(0, self.hitpoints - amount)
-        if self.hitpoints <= 0 and self.is_alive:
+        if self.data.name == "KingTower" and amount > 0:
+            self.tower_active = True
+        self.data.hp -= amount
+        if self.data.hp <= 0 and self.is_alive:
             self.is_alive = False
             self.on_death()  # Trigger death mechanics
 
     def on_spawn(self) -> None:
-        """Called when entity is spawned in battle"""
-        print(f"[Lifecycle] on_spawn {getattr(self.card_stats, 'name', 'Unknown')} id={self.id}")
+        """Some characters may spawn with effects like electric wizards and ice wizards"""
         for mechanic in self.mechanics:
             mechanic.on_spawn(self)
 
     def on_death(self) -> None:
-        """Called when entity dies"""
-        print(f"[Lifecycle] on_death {getattr(self.card_stats, 'name', 'Unknown')} id={self.id}")
+        """Some characters have special effects on death like the Golem spawns two small Golems on death"""
         for mechanic in self.mechanics:
             mechanic.on_death(self)
     
-    def _deal_attack_damage(self, primary_target: 'Entity', damage: float, battle_state: 'BattleState') -> None:
+    def _deal_attack_damage(self, primary_target, damage: float, battle_state) -> None:
         """Deal damage to target, with splash damage if applicable"""
-        if not primary_target.is_alive:
-            return
-        
-        # Record attack time for AoE visualization
-        self.last_attack_time = battle_state.time
-        
-        # Get area damage radius from different possible sources
-        area_damage_radius = None
-        if hasattr(self.card_stats, 'area_damage_radius') and self.card_stats.area_damage_radius:
-            area_damage_radius = self.card_stats.area_damage_radius / 1000.0
-        elif hasattr(self.card_stats, 'projectile_splash_radius') and self.card_stats.projectile_splash_radius:
-            area_damage_radius = self.card_stats.projectile_splash_radius / 1000.0
-        
-        # Deal damage to primary target
+        area_damage_radius = 0
+        if not primary_target.is_alive: return
+        if self.data.area_damage_radius is not None:
+            area_damage_radius = self.data.area_damage_radius / 1000.0
+        elif self.data.projectile_damage_radius is not None:
+            area_damage_radius = self.data.projectile_damage_radius / 1000.0
+
         primary_target.take_damage(damage)
-        
-        # Deal splash damage if this unit has area damage
-        if area_damage_radius and area_damage_radius > 0:
-            # Find all entities within splash radius
+
+        if area_damage_radius > 0:
             for entity in list(battle_state.entities.values()):
-                if entity == primary_target or entity.player_id == self.player_id:
-                    continue
-                
-                # Check distance using hitbox overlap detection
+                if entity == primary_target or entity.player_id == self.player: continue
                 entity_distance = primary_target.position.distance_to(entity.position)
-                
-                # Calculate combined radius for overlap check
-                primary_radius = getattr(primary_target.card_stats, 'collision_radius', 0.5) or 0.5
-                entity_radius = getattr(entity.card_stats, 'collision_radius', 0.5) or 0.5
-                
-                # Check if splash radius overlaps with entity hitbox
+                entity_radius = self.data.collision_radius/1000.0 or 0.5
                 if entity_distance <= (area_damage_radius + entity_radius):
                     entity.take_damage(damage)
-    
-    def apply_stun(self, duration: float) -> None:
-        """Apply stun effect for specified duration"""
-        self.stun_timer = max(self.stun_timer, duration)
-        # Stun resets/restarts attack timing for units already in the attack loop.
-        hit_interval = self.get_attack_interval_seconds()
-        if hit_interval > 0:
-            self.attack_cooldown = max(self.attack_cooldown, hit_interval)
 
+    def apply_stun(self, duration: float):
+        """Apply stun effect for specified duration"""
+        if duration > self.stun_timer: self.stun_timer = duration
+        # Stun resets/restarts attack timing for units already in the attack loop.
+        attack_interval = (self.data.hit_speed / 1000.0) / (self.attack_speed_debuff * self.attack_speed_buff)
+        self.attack_cooldown = max(self.attack_cooldown, attack_interval)
         # Allow card mechanics to react to stun (e.g., Sparky charge reset).
         for mechanic in getattr(self, "mechanics", []):
             handler = getattr(mechanic, "handle_stun", None)
@@ -155,376 +81,164 @@ class Entity(ABC):
         
     def apply_slow(self, duration: float, multiplier: float) -> None:
         """Apply slow effect for specified duration"""
-        if hasattr(self, 'speed') and self.original_speed is None:
-            self.original_speed = self.speed
         self.slow_timer = max(self.slow_timer, duration)
         self.slow_multiplier = min(self.slow_multiplier, multiplier)
-        self.attack_speed_debuff_multiplier = min(self.attack_speed_debuff_multiplier, multiplier)
-        if hasattr(self, 'speed'):
-            self.speed = self.original_speed * self.slow_multiplier
+        self.attack_speed_debuff = min(self.attack_speed_debuff, multiplier)
+        self.speed = self.data.speed * self.slow_multiplier
     
     def update_status_effects(self, dt: float) -> None:
         """Update status effect timers"""
-        # Update stun timer
-        if self.stun_timer > 0:
-            self.stun_timer -= dt
-        
-        # Update slow timer and restore speed when expired
+        if self.stun_timer > 0: self.stun_timer -= dt
         if self.slow_timer > 0:
             self.slow_timer -= dt
             if self.slow_timer <= 0:
-                # Restore original speed
-                if hasattr(self, 'speed') and self.original_speed is not None:
-                    self.speed = self.original_speed
-                    self.original_speed = None
+                self.speed = self.data.speed
                 self.slow_multiplier = 1.0
-                self.attack_speed_debuff_multiplier = 1.0
+                self.attack_speed_debuff = 1.0
 
-        # Handle temporary buffs that adjust speed/damage
-        if getattr(self, '_buff_active', False):
-            if hasattr(self, 'battle_state'):
-                if self.battle_state.time >= getattr(self, '_buff_end_time', 0):
-                    if hasattr(self, '_original_speed') and self._original_speed is not None:
-                        if hasattr(self, 'speed'):
-                            self.speed = self._original_speed
-                        self._original_speed = None
-                    if hasattr(self, '_original_damage') and self._original_damage is not None:
-                        self.damage = self._original_damage
-                        self._original_damage = None
-                    self.attack_speed_buff_multiplier = 1.0
-                    self._buff_active = False
-                    self._buff_end_time = None
-
-    def get_attack_rate_multiplier(self) -> float:
-        """Effective attack-rate multiplier (<=1 slow, >1 buffs)."""
-        multiplier = self.attack_speed_debuff_multiplier * self.attack_speed_buff_multiplier
-        return max(0.0, multiplier)
-
-    def get_attack_interval_seconds(self) -> float:
-        """Current time between attacks after attack-speed modifiers."""
-        hit_speed_ms = getattr(getattr(self, "card_stats", None), "hit_speed", None)
-        if not hit_speed_ms:
-            return 1.0
-        rate_multiplier = max(0.05, self.get_attack_rate_multiplier())
-        return (hit_speed_ms / 1000.0) / rate_multiplier
-    
-    def is_stunned(self) -> bool:
-        """Check if entity is currently stunned"""
-        return self.stun_timer > 0
-    
-    def can_attack_target(self, target: 'Entity') -> bool:
-        """Check if this entity can attack the target"""
-        if not self._is_valid_target(target):
-            return False
-
-        if target.is_air_unit and not self._can_attack_air():
-            return False
-        if (not target.is_air_unit) and not self._can_attack_ground():
-            return False
-        
-        distance = self.position.distance_to(target.position)
-        target_radius = getattr(target.card_stats, "collision_radius", 0.5) or 0.5
-        return distance <= (self.range + target_radius)
-    
     def _is_valid_target(self, entity: 'Entity') -> bool:
         """Check if entity can be targeted (excludes spell entities)"""
         # Spell entities cannot be targeted by troops
         spell_entity_types = {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect'}
-        if type(entity).__name__ in spell_entity_types:
-            return False
-
-        # Stealthed entities cannot be targeted until their cloak expires
+        if type(entity).__name__ in spell_entity_types: return False
         stealth_until = getattr(entity, '_stealth_until', 0)
         if stealth_until and hasattr(entity, 'battle_state'):
             current_ms = int(entity.battle_state.time * 1000)
             if stealth_until > current_ms:
                 return False
-
-        # Must be alive and enemy
-        return entity.is_alive and entity.player_id != self.player_id
+        return entity.is_alive and entity.player != self.player
     
-    def get_nearest_target(self, entities: Dict[int, 'Entity']) -> Optional['Entity']:
+    def can_attack_target(self, target: 'Entity') -> bool:
+        """Check if this entity can attack the target"""
+        if not self._is_valid_target(target): return False
+        if ((target.data.is_air_unit and not self.data.attack_air) or
+                ((not target.data.is_air_unit) and not self.data.attack_ground)): return False
+        distance = self.position.distance_to(target.position)
+        return distance <= self.data.range + target.data.collision_radius
+
+    def get_nearest_target(self, entities):
         """Find nearest valid target with priority rules"""
         nearest = None
         min_distance = float('inf')
-        
-        # Priority: Troops > Buildings (authentic Clash Royale behavior)
         building_targets = []
         troop_targets = []
         
-        # Check if this unit can only target buildings
-        targets_only_buildings = (hasattr(self, 'card_stats') and 
-                                self.card_stats and 
-                                getattr(self.card_stats, 'targets_only_buildings', False))
-        
-        # Check what this unit can attack
-        can_attack_air = self._can_attack_air()
-        can_attack_ground = self._can_attack_ground()
-        
         for entity in entities.values():
-            # Only check if entity is valid target (excludes spell entities)
-            if not self._is_valid_target(entity):
-                continue
-
-            # Additional safety: never target spell entities explicitly by class types
-            if isinstance(entity, (Projectile, SpawnProjectile, RollingProjectile, AreaEffect)):
-                continue
-                
+            if not self._is_valid_target(entity): continue # exclude spells or stealth entities
             distance = self.position.distance_to(entity.position)
-            
-            # Check air targeting rules
-            if entity.is_air_unit and not can_attack_air:
-                continue  # Skip air units if we can't attack air
-            if (not entity.is_air_unit) and not can_attack_ground:
-                continue  # Skip ground units if we can't attack ground
-            
-            # Only consider targets within sight range for troops vs troops
-            if isinstance(entity, Building):
-                building_targets.append((entity, distance))
-            else:
-                # For troop targets, only consider if within sight range
-                if distance <= self.sight_range:
-                    # Skip troops if we only target buildings
-                    if not targets_only_buildings:
-                        troop_targets.append((entity, distance))
-        
-        # Choose targets based on targeting rules
-        if targets_only_buildings:
-            targets = building_targets  # Only consider buildings
+            if (entity.is_air_unit and not self.data.attack_air) or ((not entity.is_air_unit) and not self.data.attack_ground):
+                continue
+            if distance <= self.data.sight_range:
+                if isinstance(entity, Building):
+                    building_targets.append((distance, entity))
+                elif not self.data.target_only_buildings:
+                    troop_targets.append((distance, entity))
+
+        if self.data.target_only_buildings:
+            targets = building_targets
         else:
-            targets = troop_targets if troop_targets else building_targets  # Troops first, then buildings
-        
-        for entity, distance in targets:
-            if distance < min_distance:
-                min_distance = distance
-                nearest = entity
-        
-        return nearest
+            targets = troop_targets if troop_targets else building_targets
+        return sorted(targets)[0][1] # returns nearest entity
     
     def _should_switch_target(self, current_target: 'Entity', new_target: 'Entity') -> bool:
         """Determine if we should switch from current target to new target"""
-        if getattr(self.card_stats, 'targets_only_buildings', False) and not isinstance(new_target, Building):
+        if self.position.distance_to(new_target.position) < self.data.sight_range: return False
+        if self.data.target_only_buildings and not isinstance(new_target, Building): return False
+        if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius:
             return False
         # Always switch to troops in sight range (higher priority than buildings)
         is_current_building = isinstance(current_target, Building)
         is_new_troop = not isinstance(new_target, Building)
-        
         if is_new_troop and is_current_building:
-            # Switch from building to troop if troop is in sight range
-            distance_to_new = self.position.distance_to(new_target.position)
-            if distance_to_new <= self.sight_range:
-                return True
-        
-        # Don't switch if current target is closer and same type
-        current_distance = self.position.distance_to(current_target.position)
-        new_distance = self.position.distance_to(new_target.position)
-        
-        # If both are same type (both troops or both buildings), keep closer one
-        if isinstance(current_target, Building) == isinstance(new_target, Building):
-            return new_distance < current_distance
-        
+            return True
         return False
 
-    def _can_attack_air(self) -> bool:
-        """Return True if this entity can attack air units."""
-        card_stats = getattr(self, "card_stats", None)
-        if not card_stats:
-            return True
-        target_type = getattr(card_stats, "target_type", None)
-        if target_type in {"TID_TARGETS_AIR", "TID_TARGETS_AIR_AND_GROUND"}:
-            return True
-        return bool(getattr(card_stats, "attacks_air", False))
 
-    def _can_attack_ground(self) -> bool:
-        """Return True if this entity can attack ground units."""
-        card_stats = getattr(self, "card_stats", None)
-        if not card_stats:
-            return True
-        target_type = getattr(card_stats, "target_type", None)
-        if target_type in {
-            "TID_TARGETS_GROUND",
-            "TID_TARGETS_AIR_AND_GROUND",
-            "TID_TARGETS_BUILDINGS",
-            "TID_TARGETS_GROUND_AND_BUILDINGS",
-            "TID_TARGETS_BUILDINGS_AND_GROUND",
-        }:
-            return True
-        return bool(getattr(card_stats, "attacks_ground", True))
-
-
-@dataclass
 class Troop(Entity):
-    speed: float = 1.0
-    target_type: TargetType = TargetType.BOTH
-    
-    # Charging mechanics
-    is_charging: bool = False
-    has_charged: bool = False  # Track if first charge attack has been used
-    charge_target_position: Optional[Position] = None
-    distance_traveled: float = 0.0  # Track distance traveled for charging
-    initial_position: Position = None  # Store initial position for distance calculation
-    
-    def update(self, dt: float, battle_state: 'BattleState') -> None:
-        """Update troop - move and attack"""
-        if not self.is_alive:
-            return
+    def __init__(self, id, position, player, card_name, mechanics):
+        super().__init__(id, position, player, card_name, mechanics)
+        self.is_charging  = False
+        self.charge_target_position = None
+        self.distance_traveled = 0.0
+        self.initial_position = None
+        self.deploy_delay_remaining = self.data.deploy_time
+        self.initial_position = Position(self.position.x, self.position.y)
+        self.target_id = None
 
-        if self.deploy_delay_remaining > 0:
-            self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
-            return
-        
-        # Update status effects first
-        self.update_status_effects(dt)
+    def _update_charging_state(self) -> None:
+        """Update charging state - check if troop should start charging based on distance traveled"""
+        distance_traveled = self.position.distance_to(self.initial_position)
+        charge_distance_tiles = self.data.charge_range / 1000.0
+        if distance_traveled >= charge_distance_tiles and not self.is_charging:
+            self.is_charging = True
+            self.speed *= 2
 
-        # Call on_tick for all mechanics
-        for mechanic in self.mechanics:
-            mechanic.on_tick(self, dt * 1000)  # Convert to ms
+    def _move_towards_target(self, target_entity: 'Entity', dt: float, battle_state=None) -> None:
+        """Move towards target entity with simple obstacle avoidance"""
+        # Air units fly directly to targets
+        if self.data.is_air_unit: pathfind_target = target_entity.position
+        else: pathfind_target = self._get_pathfind_target(target_entity, battle_state)
+        dx, dy = pathfind_target.x-self.position.x, pathfind_target.y-self.position.y
+        distance = math.hypot(dx, dy)
+        move_distance = max((self.speed / 60.0) * dt, distance)
+        move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
 
-        # If stunned, can't move or attack
-        if self.is_stunned():
-            return
-        
-        # Store initial position for distance tracking
-        if self.initial_position is None:
-            self.initial_position = Position(self.position.x, self.position.y)
-        
-        # Update attack cooldown and track time for visualization
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= dt * self.get_attack_rate_multiplier()
-        
-        # Update last attack time for visualization tracking
-        self.last_attack_time += dt
-        
-        # Handle charging mechanics based on distance traveled
-        if getattr(self.card_stats, 'charge_range', None) and not self.has_charged:
-            self._update_charging_state(battle_state)
-        
-        # Always re-evaluate targets every tick to switch to higher priority enemies
-        current_target = None
-        if self.target_id:
-            current_target = battle_state.entities.get(self.target_id)
-            if not current_target or not current_target.is_alive:
-                self.target_id = None
-                current_target = None
-        
-        # Always check for better targets (troops in FOV take priority over buildings)
-        best_target = self.get_nearest_target(battle_state.entities)
-        if best_target and (not current_target or self._should_switch_target(current_target, best_target)):
-            current_target = best_target
-            self.target_id = current_target.id
-        
-        if current_target:
-            # Move towards target if out of range
-            distance = self.position.distance_to(current_target.position)
-            target_radius = getattr(current_target.card_stats, "collision_radius", 0.5) or 0.5
-            if distance > (self.range + target_radius):
-                self._move_towards_target(current_target, dt, battle_state)
-            elif self.attack_cooldown <= 0:
-                # Call on_attack_start for all mechanics
-                for mechanic in self.mechanics:
-                    mechanic.on_attack_start(self, current_target)
+        # Check if the new position would be walkable (for ground units)
+        new_position = Position(self.position.x + move_x, self.position.y + move_y)
 
-                # Check if this troop uses projectiles
-                if self._uses_projectiles():
-                    self._create_projectile(current_target, battle_state)
-                else:
-                    # Direct attack with special charging damage if applicable
-                    attack_damage = self._get_attack_damage()
-                    self._deal_attack_damage(current_target, attack_damage, battle_state)
+        # Air units ignore walkability checks, ground units must check
+        if self.data.is_air_unit or (battle_state.is_ground_position_walkable(new_position, self)):
+            self.position.x += move_x
+            self.position.y += move_y
+        else:
+            # If direct path is blocked, try to find a way around
+            alternative_move = self._find_alternative_move(move_x, move_y, battle_state)
+            if alternative_move:
+                alt_x, alt_y = alternative_move
+                self.position.x += alt_x
+                self.position.y += alt_y
 
-                # Call on_attack_hit for all mechanics
-                for mechanic in self.mechanics:
-                    mechanic.on_attack_hit(self, current_target)
+    def _find_alternative_move(self, original_move_x, original_move_y, battle_state):
+        """Find an alternative movement direction when the direct path is blocked."""
+        if not battle_state: return None
+        original_angle = math.atan2(original_move_y, original_move_x)
+        move_distance = math.hypot(original_move_x, original_move_y)
+        angle_offsets = [i * math.pi/8 for i in range(1, 9)] + [-i * math.pi/8 for i in range(1, 9)]
+        for angle_offset in angle_offsets:
+            new_angle = original_angle + angle_offset
+            new_move_x = math.cos(new_angle) * move_distance
+            new_move_y = math.sin(new_angle) * move_distance
+            alt_position = Position(self.position.x + new_move_x, self.position.y + new_move_y)
 
-                self.attack_cooldown = self.get_attack_interval_seconds()
-                self.last_attack_time = 0.0  # Reset for visualization
-                self._on_attack()  # Handle post-attack mechanics
-    
-    def _get_attack_damage(self) -> float:
-        """Get the appropriate damage value based on charging state"""
-        if getattr(self.card_stats, 'charge_range', None) and not self.has_charged and self.is_charging:
-            # Use special damage for first charge attack
-            return float(
-                (getattr(self.card_stats, 'scaled_damage_special', None)
-                 or getattr(self.card_stats, 'damage_special', None)
-                 or self.damage)
-            )
-        return float(self.damage)
-    
-    def _uses_projectiles(self) -> bool:
-        """Check if this troop uses projectiles for attacks"""
-        if getattr(self, '_force_melee_attack', False):
-            return False
-        return (self.card_stats and 
-                hasattr(self.card_stats, 'projectile_data') and 
-                self.card_stats.projectile_data is not None)
-    
+            if battle_state.is_ground_position_walkable(alt_position, self):
+                return new_move_x, new_move_y
+        return None
+
     def _create_projectile(self, target: 'Entity', battle_state: 'BattleState') -> None:
         """Create a projectile towards the target"""
-        if not self.card_stats or not self.card_stats.projectile_data:
-            # Fallback to direct attack if no projectile data
-            attack_damage = self._get_attack_damage()
-            target.take_damage(attack_damage)
-            return
-        
-        # Get projectile properties
-        projectile_data = self.card_stats.projectile_data
-        projectile_damage = self.damage  # Use entity's scaled damage instead of base projectile damage
-        projectile_speed = projectile_data.get('speed', 500) / 60.0  # Convert from per-minute to per-second
-        splash_radius = projectile_data.get('radius', 0) / 1000.0 if projectile_data.get('radius') else 0.0
-        target_buff_data = projectile_data.get("targetBuffData") or {}
-        slow_duration = projectile_data.get("buffTime", 0) / 1000.0
+        projectile_damage = self.data.projectile_data.damage  # Use entity's scaled damage instead of base projectile damage
+        projectile_speed = self.data.projectile_data.speed / 60.0  # Convert from per-minute to per-second
+        splash_radius = self.data.projectile_data.radius / 1000.0
+        target_buff_data = self.data.projectile_data.target_buff
+        slow_duration = self.data.projectile_data.buff_time / 1000.0
         slow_multiplier = 1.0 + (target_buff_data.get("speedMultiplier", 0) / 100.0)
         stun_duration = 0.0
-        if (
-            target_buff_data.get("speedMultiplier") == -100
-            and target_buff_data.get("hitSpeedMultiplier") == -100
-            and slow_duration > 0
-        ):
-            stun_duration = slow_duration
-            slow_duration = 0.0
-            slow_multiplier = 1.0
-        tid_target = projectile_data.get("tidTarget", "TID_TARGETS_AIR_AND_GROUND")
-        hits_air = "AIR" in tid_target
-        hits_ground = ("GROUND" in tid_target) or ("BUILDINGS" in tid_target)
-        if tid_target == "TID_TARGETS_GROUND":
-            hits_air = False
-            hits_ground = True
-        crown_tower_damage_multiplier = max(
-            0.0, 1.0 + (projectile_data.get("crownTowerDamagePercent", 0) / 100.0)
-        )
-        
-        # Use charging damage if applicable
-        if self.is_charging and self.card_stats.damage_special:
-            projectile_damage = (
-                getattr(self.card_stats, "scaled_damage_special", None)
-                or self.card_stats.damage_special
-            )
-        
-        # Check if this is Bowler (create rolling projectile)
-        if self.card_stats.name == "Bowler":
-            # Calculate direction to target for angled throwing
-            dx = target.position.x - self.position.x
-            dy = target.position.y - self.position.y
-            distance = (dx * dx + dy * dy) ** 0.5
-            
-            # Normalize direction and calculate end position
-            if distance > 0:
-                direction_x = dx / distance
-                direction_y = dy / distance
-                end_x = self.position.x + direction_x * 7.5  # Roll 7.5 tiles in target direction
-                end_y = self.position.y + direction_y * 7.5
-            else:
-                # Fallback if target is at same position
-                end_x = self.position.x
-                end_y = self.position.y + 7.5  # Roll forward
-            
-            # Create rolling projectile (Bowler boulder) with target direction
+        hits_air = self.data.projectile_data.hits_air
+        hits_ground = self.data.projectile_data.hits_ground
+
+        if self.is_charging and self.data.charge_damage:
+            projectile_damage = self.data.charge_damage
+
+        if self.data.name == "Bowler":
+            dx, dy = target.position.x - self.position.x, target.position.y - self.position.y
+            distance = math.hypot(dx, dy)
+            direction_x = dx / distance
+            direction_y = dy / distance
             rolling_projectile = RollingProjectile(
                 id=battle_state.next_entity_id,
                 position=Position(self.position.x, self.position.y),
-                player_id=self.player_id,
-                card_stats=self.card_stats,
+                player_id=self.player,
+                card_stats=self.data,
                 hitpoints=1,
                 max_hitpoints=1,
                 damage=projectile_damage,
@@ -535,133 +249,92 @@ class Troop(Entity):
                 spawn_delay=0.0,  # No spawn delay for Bowler
                 spawn_character=None,  # Bowler doesn't spawn units
                 spawn_character_data=None,
-                knockback_distance=projectile_data.get("pushback", 1000) / 1000.0,
-                target_direction_x=direction_x if distance > 0 else 0.0,
-                target_direction_y=direction_y if distance > 0 else 1.0
+                knockback_distance=self.data.projectile_data.pushback / 1000.0,
+                target_direction_x=direction_x,
+                target_direction_y=direction_y
             )
-            
+
             battle_state.entities[rolling_projectile.id] = rolling_projectile
         else:
             # Create regular projectile
             projectile = Projectile(
                 id=battle_state.next_entity_id,
                 position=Position(self.position.x, self.position.y),
-                player_id=self.player_id,
-                card_stats=self.card_stats,
+                player_id=self.player,
+                card_stats=self.data,
                 hitpoints=1,
                 max_hitpoints=1,
                 damage=projectile_damage,
-                range=self.range,
+                range=self.data.range,
                 sight_range=1.0,
                 target_position=Position(target.position.x, target.position.y),
                 travel_speed=projectile_speed,
                 splash_radius=splash_radius,
-                source_name=self.card_stats.name if self.card_stats else "Unknown",
+                source_name=self.data.name,
                 stun_duration=stun_duration,
                 slow_duration=slow_duration,
                 slow_multiplier=max(0.0, slow_multiplier),
-                knockback_distance=projectile_data.get("pushback", 0) / 1000.0,
+                knockback_distance=self.data.projectile_data.pushback / 1000.0,
                 hits_air=hits_air,
                 hits_ground=hits_ground,
-                crown_tower_damage_multiplier=crown_tower_damage_multiplier,
+                crown_tower_damage_multiplier=1
             )
-            
+
             battle_state.entities[projectile.id] = projectile
-        
+
         battle_state.next_entity_id += 1
-    
-    def _on_attack(self) -> None:
-        """Handle post-attack mechanics like charging state reset"""
-        if self.card_stats.charge_range and not self.has_charged and self.is_charging:
-            self.has_charged = True
-            self.is_charging = False
-            self.charge_target_position = None
-            # Reset to normal speed if charge speed multiplier was applied
-            if self.card_stats.charge_speed_multiplier:
-                self.speed = self.card_stats.speed or 60.0
-    
-    def _update_charging_state(self, battle_state: 'BattleState') -> None:
-        """Update charging state - check if troop should start charging based on distance traveled"""
-        # Calculate distance traveled from initial position
-        if self.initial_position:
-            distance_traveled = self.position.distance_to(self.initial_position)
-            charge_distance_tiles = self.card_stats.charge_range / 1000.0 if self.card_stats.charge_range else 0.0
-            
-            # Start charging after traveling the required distance
-            if distance_traveled >= charge_distance_tiles and not self.is_charging and not self.has_charged:
-                self.is_charging = True
-                # Apply charge speed multiplier if available
-                if self.card_stats.charge_speed_multiplier:
-                    speed_multiplier = 1.0 + (self.card_stats.charge_speed_multiplier / 100.0)
-                    self.speed = (self.card_stats.speed or 60.0) * speed_multiplier
-    
-    def _move_towards_target(self, target_entity: 'Entity', dt: float, battle_state=None) -> None:
-        """Move towards target entity with simple obstacle avoidance"""
-        # Air units fly directly to targets
-        if self.is_air_unit:
-            pathfind_target = target_entity.position
-        else:
-            # Ground units use bridge navigation if needed
-            pathfind_target = self._get_pathfind_target(target_entity, battle_state)
 
-        dx = pathfind_target.x - self.position.x
-        dy = pathfind_target.y - self.position.y
-        distance = (dx * dx + dy * dy) ** 0.5
+    def update(self, dt: float, battle_state: 'BattleState') -> None:
+        """Update troop - move and attack"""
+        if not self.is_alive: return
+        if self.stun_timer > 0: return
+        if self.deploy_delay_remaining > 0:
+            self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
+            return # Haven't finished deploying yet
+        self.update_status_effects(dt) # for now, it's only slow and stun
+        for mechanic in self.mechanics:
+            mechanic.on_tick(self, dt * 1000)  # Convert to ms
+        
+        # Update attack cooldown and track time for visualization
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= dt / (self.attack_speed_buff * self.attack_speed_debuff)
+        if self.data.charge_range: self._update_charging_state()
 
-        if distance > 0:
-            # Normalize and scale by speed
-            speed_tiles_per_second = self.speed / 60.0  # Convert tiles/min to tiles/sec
-            move_distance = speed_tiles_per_second * dt
+        current_target = None
+        if self.target_id is not None:
+            current_target = battle_state.entities.get(self.target_id)
+            if not current_target or not current_target.is_alive: self.target_id = None
+        
+        # Always check for better targets (troops in FOV take priority over buildings)
+        best_target = self.get_nearest_target(battle_state.entities)
+        if best_target and (not current_target or self._should_switch_target(current_target, best_target)):
+            current_target = best_target
+            self.target_id = current_target.id
+        
+        if current_target:
+            # Move towards target if out of range
+            distance = self.position.distance_to(current_target.position)
+            if distance > (self.data.range + current_target.data.collision_radius):
+                self._move_towards_target(current_target, dt, battle_state)
+            elif self.attack_cooldown <= 0:
+                for mechanic in self.mechanics:
+                    mechanic.on_attack_start(self, current_target)
+                # Check if this troop uses projectiles
+                if self.data.projectiles:
+                    self._create_projectile(current_target, battle_state)
+                else:
+                    # Direct attack with special charging damage if applicable
+                    if self.is_charging: attack_damage = self.data.charge_damage
+                    else: attack_damage = self.data.damage
+                    self._deal_attack_damage(current_target, attack_damage, battle_state)
 
-            # Don't overshoot the target
-            if move_distance > distance:
-                move_distance = distance
-
-            move_x = (dx / distance) * move_distance
-            move_y = (dy / distance) * move_distance
-
-            # Check if the new position would be walkable (for ground units)
-            new_position = Position(self.position.x + move_x, self.position.y + move_y)
-
-            # Air units ignore walkability checks, ground units must check
-            if self.is_air_unit or (battle_state and battle_state.is_ground_position_walkable(new_position, self)):
-                self.position.x += move_x
-                self.position.y += move_y
-            else:
-                # If direct path is blocked, try to find a way around
-                alternative_move = self._find_alternative_move(move_x, move_y, battle_state)
-                if alternative_move:
-                    alt_x, alt_y = alternative_move
-                    self.position.x += alt_x
-                    self.position.y += alt_y
-
-    def _find_alternative_move(self, original_move_x: float, original_move_y: float, battle_state) -> Optional[tuple]:
-        """Find an alternative movement direction when the direct path is blocked."""
-        if not battle_state:
-            return None
-
-        # Try different angles around the blocked direction
-        import math
-
-        # Calculate the original angle
-        original_angle = math.atan2(original_move_y, original_move_x)
-        move_distance = math.sqrt(original_move_x * original_move_x + original_move_y * original_move_y)
-
-        # Try angles offset by 45°, 90°, -45°, -90° from the original direction
-        angle_offsets = [math.pi/4, math.pi/2, -math.pi/4, -math.pi/2]
-
-        for angle_offset in angle_offsets:
-            new_angle = original_angle + angle_offset
-            new_move_x = math.cos(new_angle) * move_distance
-            new_move_y = math.sin(new_angle) * move_distance
-
-            # Check if this alternative direction is walkable
-            alt_position = Position(self.position.x + new_move_x, self.position.y + new_move_y)
-
-            if battle_state.is_ground_position_walkable(alt_position, self):
-                return (new_move_x, new_move_y)
-
-        return None
+                for mechanic in self.mechanics:
+                    mechanic.on_attack_hit(self, current_target)
+                self.attack_cooldown = 1 / (self.data.hit_speed/1000)
+                if self.data.charge_range and self.is_charging:
+                    self.is_charging = False
+                    self.charge_target_position = None
+                    self.speed /= 2
 
     def _get_pathfind_target(self, target_entity: 'Entity', battle_state=None) -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -670,123 +343,38 @@ class Troop(Entity):
         - Before first tower destroyed: 1) Troops in sight range, 2) Bridge center, 3) Princess towers
         - After first tower destroyed: 1) Troops in FOV, 2) Center bridge, 3) Cross bridge if clear, 4) Target buildings
         """
-        from .battle import BattleState
-
         final_target = target_entity.position
-
-        # Air units bypass bridge pathfinding - they fly directly to targets
-        if self.is_air_unit:
-            distance_to_target = self.position.distance_to(final_target)
-            is_troop = not isinstance(target_entity, Building)
-
-            # Priority 1: If target is a troop within sight range, go directly
-            if is_troop and distance_to_target <= self.sight_range:
-                return final_target
-
-            # Priority 2: Go directly to any target (towers, etc.) - air units ignore bridges
+        if self.data.is_air_unit:
             return final_target
-
-        # Ground units use bridge pathfinding
-        # Check if we need to cross the river (river at y=16)
-        current_side = 0 if self.position.y < 16.0 else 1
-        target_side = 0 if final_target.y < 16.0 else 1
-        need_to_cross = current_side != target_side
-
-        # Priority 1: If target is a troop within sight range, go directly
-        distance_to_target = self.position.distance_to(final_target)
-        is_troop = not isinstance(target_entity, Building)
-
-        # For troop targets within sight range, still check if we need bridge pathfinding
-        if is_troop and distance_to_target <= self.sight_range:
-            # If we don't need to cross the river, go directly
-            if not need_to_cross:
-                return final_target
-            # If we need to cross, continue with bridge logic even for troops
-
-        # If we don't need to cross, go directly to target
+        need_to_cross = (self.position.y - 16.0)*(final_target.y - 16.0) < 0
         if not need_to_cross:
             return final_target
-
-        # Check if first tower has been destroyed to determine pathfinding mode
-        first_tower_destroyed = self._is_first_tower_destroyed(battle_state)
-
-        if first_tower_destroyed:
+        total = 0
+        for player in battle_state.players:
+            total += int(player.left_tower_hp > 0) + int(player.right_tower_hp > 0)
+        if total < 4: # At least a tower is destroyed, needs more advanced pathfinding
             return self._get_advanced_pathfind_target(target_entity)
         else:
-            return self._get_basic_pathfind_target(target_entity)
+            return self._get_basic_pathfind_target()
 
-    def _is_first_tower_destroyed(self, battle_state) -> bool:
-        """Check if the first tower (any princess tower) has been destroyed"""
-        if not battle_state:
-            return False
-
-        # Check if any princess towers are destroyed by looking at player tower HP
-        total_princess_towers_alive = 0
-
-        for player in battle_state.players:
-            if player.left_tower_hp > 0:
-                total_princess_towers_alive += 1
-            if player.right_tower_hp > 0:
-                total_princess_towers_alive += 1
-
-        # If we have less than 4 princess towers alive, at least one has been destroyed
-        return total_princess_towers_alive < 4
-
-    def _get_basic_pathfind_target(self, target_entity: 'Entity') -> Position:
+    def _get_basic_pathfind_target(self) -> Position:
         """Original pathfinding logic before first tower is destroyed"""
-        final_target = target_entity.position
-
-        # We need to cross the river - use bridge logic
-        # Determine which bridge to use (left at x=3.5, right at x=14.5)
-        left_bridge_dist = abs(self.position.x - 3.5)
-        right_bridge_dist = abs(self.position.x - 14.5)
-
-        if left_bridge_dist < right_bridge_dist:
-            bridge_x = 3.5  # Left bridge center of center tile
-        else:
-            bridge_x = 14.5  # Right bridge center of center tile
-
-        # Bridge center is at the actual center of the bridge structure
-        bridge_y = 16.0  # Dead center of the bridge spanning the river
-        bridge_center = Position(bridge_x, bridge_y)
-
-        # Check if we're on the bridge (within 1.5 tiles of bridge center)
-        # Bridge is 3 tiles wide, pathfinder targets center of center tile
-        on_bridge = (abs(self.position.x - bridge_x) <= 1.5 and
+        near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
+        on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
                     abs(self.position.y - 16.0) <= 1.0)
-
         if on_bridge:
-            # Priority 3: On bridge - go to appropriate princess tower
-            if self.player_id == 0:  # Blue player going to red side
-                if bridge_x == 3.5:  # Left bridge -> left tower
-                    return Position(3.5, 25.5)  # RED_LEFT_TOWER
-                else:  # Right bridge -> right tower
-                    return Position(14.5, 25.5)  # RED_RIGHT_TOWER
-            else:  # Red player going to blue side
-                if bridge_x == 3.5:  # Left bridge -> left tower
-                    return Position(3.5, 6.5)  # BLUE_LEFT_TOWER
-                else:  # Right bridge -> right tower
-                    return Position(14.5, 6.5)  # BLUE_RIGHT_TOWER
+            if self.player == 0:
+                return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
+            else:
+                return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
         else:
-            # Priority 2: Behind bridge - go to bridge center
-            return bridge_center
+            possible_x = [2, 3, 4, 13, 14, 15]
+            return Position(max(possible_x, key=lambda x: abs(self.position.x - x)), 16.0)
 
     def _get_advanced_pathfind_target(self, target_entity: 'Entity') -> Position:
         """Advanced pathfinding logic after first tower is destroyed"""
         final_target = target_entity.position
-
-        # Choose the nearest actual bridge (left at x=3.5 or right at x=14.5)
-        left_bridge = Position(3.5, 16.0)
-        right_bridge = Position(14.5, 16.0)
-
-        # Determine which bridge is closer
-        dist_to_left = self.position.distance_to(left_bridge)
-        dist_to_right = self.position.distance_to(right_bridge)
-
-        if dist_to_left <= dist_to_right:
-            chosen_bridge = left_bridge
-        else:
-            chosen_bridge = right_bridge
+        near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
 
         # Check if we're on either bridge
         on_left_bridge = (abs(self.position.x - 3.5) <= 1.5 and abs(self.position.y - 16.0) <= 1.0)
@@ -894,7 +482,7 @@ class Building(Entity):
                     return
 
         # If stunned, can't attack
-        if self.is_stunned():
+        if self.stun_timer > 0:
             return
         
         # Update attack cooldown and track time for visualization

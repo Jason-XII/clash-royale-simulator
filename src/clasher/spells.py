@@ -52,7 +52,7 @@ class DirectDamageSpell(Spell):
         """Deal damage to all enemies in radius"""
         targets_hit = 0
         
-        for entity in battle_state.entities.values():
+        for entity in list(battle_state.entities.values()):
             if entity.player_id == player_id or not entity.is_alive:
                 continue
 
@@ -275,7 +275,7 @@ class BuffSpell(Spell):
         """Apply buff to friendly units in radius"""
         targets_hit = 0
         
-        for entity in battle_state.entities.values():
+        for entity in list(battle_state.entities.values()):
             if entity.player_id != player_id or not entity.is_alive:
                 continue
             
@@ -304,7 +304,7 @@ class FreezeSpell(Spell):
         """Freeze enemies in radius"""
         targets_hit = 0
         
-        for entity in battle_state.entities.values():
+        for entity in list(battle_state.entities.values()):
             if entity.player_id == player_id or not entity.is_alive:
                 continue
             
@@ -330,7 +330,7 @@ class CloneSpell(Spell):
         
         # Find friendly troops in radius
         troops_to_clone = []
-        for entity in battle_state.entities.values():
+        for entity in list(battle_state.entities.values()):
             if entity.player_id != player_id or not entity.is_alive:
                 continue
             
@@ -373,7 +373,7 @@ class HealSpell(Spell):
         """Heal friendly units in radius"""
         targets_hit = 0
         
-        for entity in battle_state.entities.values():
+        for entity in list(battle_state.entities.values()):
             if entity.player_id != player_id or not entity.is_alive:
                 continue
             

@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-import time
 import math
 import random
 import copy
@@ -9,14 +8,6 @@ import json
 from .entities import Entity, Troop, Building
 from .player import PlayerState
 from .arena import TileGrid, Position
-from .card_aliases import resolve_card_name
-from .data import CardDataLoader
-from .card_types import CardStatsCompat
-from .factory.dynamic_factory import (
-    building_from_values,
-    troop_from_character_data,
-    troop_from_values,
-)
 from .spells import SPELL_REGISTRY
 from .mechanics.shared.death_effects import DeathSpawn
 
@@ -188,10 +179,10 @@ class BattleState:
         """Deploy a card at the given position"""
         player = self.players[player_id]
         resolved_name = resolve_card_name(card_name, self.card_loader.load_card_definitions())
-        # Fetch card stats from the factory-backed loader
         card_stats = self.card_loader.get_card(resolved_name)
 
         if not card_stats or not player.can_play_card(card_name, card_stats):
+            print("Cannot play card: ", player.can_play_card(card_name, card_stats))
             return False
 
         is_spell = resolved_name in SPELL_REGISTRY
@@ -210,9 +201,8 @@ class BattleState:
                 return False
 
         # Special deployment validation for Royal Recruits (center 6 tiles only)
-        if resolved_name in ['RoyalRecruits', 'RoyalRecruits_Chess']:
-            if not (6 <= position.x <= 11):
-                return False  # Royal Recruits can only be deployed in center 6 tiles
+        if resolved_name == 'RoyalRecruits' and not (6 <= position.x <= 11):
+            return False
 
         if not is_spell:
             # Buildings are solid obstacles; do not allow overlapping deployment.
@@ -271,7 +261,8 @@ class BattleState:
         
         # Determine if this is an air unit (based on target_type or known list)
         air_units = ['Minions', 'MinionHorde', 'Balloon', 'SkeletonBalloon', 'BabyDragon', 
-                    'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion']
+                    'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion', 'DartBarrell',
+                     'Bats', 'LavaHound']
         is_air_unit = (getattr(card_stats, 'name', '') in air_units) or (
             getattr(card_stats, 'target_type', '') == 'TID_TARGETS_AIR'
         )
@@ -337,6 +328,7 @@ class BattleState:
         if is_royal_recruits:
             # Royal Recruits spawn in a horizontal line across battlefield
             self._spawn_royal_recruits_line(center_pos, player_id, card_stats, count)
+
         elif has_front_back:
             # Spawn in front/back formation for mixed swarms
             self._spawn_front_back_formation(center_pos, player_id, card_stats, count, second_count, second_data, radius)
@@ -381,8 +373,9 @@ class BattleState:
         speed = card_stats.speed or 60.0
         
         # Determine if this is an air unit
-        air_units = ['Minions', 'MinionHorde', 'Balloon', 'SkeletonBalloon', 'BabyDragon', 
-                    'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion']
+        air_units = ['Minions', 'MinionHorde', 'Balloon', 'SkeletonBalloon', 'BabyDragon',
+                     'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion', 'DartBarrell',
+                     'Bats', 'LavaHound']
         is_air_unit = card_stats.name in air_units
         
         # Use level-scaled stats for hitpoints and damage
@@ -496,46 +489,78 @@ class BattleState:
             
             self._spawn_unit_at_position(back_pos, player_id, back_card_stats)
     
-    def _spawn_royal_recruits_line(self, center_pos: Position, player_id: int, card_stats: CardStatsCompat, count: int) -> None:
-        """Spawn Royal Recruits in a horizontal line across the battlefield, avoiding towers"""
-        # Royal Recruits: 6 units spaced 2.5 tiles apart, center at deploy position
-        spacing = 2.5  # tiles between each recruit
-        
-        # Get tower-blocked X ranges for this Y coordinate
+    # def _spawn_royal_recruits_line(self, center_pos: Position, player_id: int, card_stats: CardStatsCompat, count: int) -> None:
+    #     """Spawn Royal Recruits in a horizontal line across the battlefield, avoiding towers"""
+    #     # Royal Recruits: 6 units spaced 2.5 tiles apart, center at deploy position
+    #     spacing = 2.5  # tiles between each recruit
+    #
+    #     # Get tower-blocked X ranges for this Y coordinate
+    #     blocked_ranges = self.arena.get_tower_blocked_x_ranges(center_pos.y, self)
+    #
+    #     # Calculate initial line positions
+    #     total_width = (count - 1) * spacing
+    #     leftmost_x = center_pos.x - (total_width / 2)
+    #
+    #     # Generate all recruit X positions
+    #     recruit_positions = []
+    #     for i in range(count):
+    #         recruit_x = leftmost_x + (i * spacing)
+    #         recruit_positions.append(recruit_x)
+    #
+    #     # Check if any positions would overlap with towers
+    #     needs_adjustment = False
+    #     for recruit_x in recruit_positions:
+    #         for x_min, x_max in blocked_ranges:
+    #             if x_min <= recruit_x <= x_max:
+    #                 needs_adjustment = True
+    #                 break
+    #         if needs_adjustment:
+    #             break
+    #
+    #     # If line overlaps with towers, find alternative positioning
+    #     if needs_adjustment:
+    #         recruit_positions = self._find_safe_recruit_positions(center_pos, count, spacing, blocked_ranges)
+    #
+    #     # Ensure all positions are within arena bounds
+    #     recruit_positions = [max(0.5, min(17.5, x)) for x in recruit_positions]
+    #
+    #     # Spawn each recruit
+    #     for recruit_x in recruit_positions:
+    #         recruit_pos = Position(recruit_x, center_pos.y)
+    #         recruit_pos = self._snap_to_valid_position(recruit_pos, player_id)
+    #         self._spawn_unit_at_position(recruit_pos, player_id, card_stats)
+    def _spawn_royal_recruits_line(self, center_pos: Position, player_id: int, card_stats: CardStatsCompat,
+                                   count: int) -> None:
+        """Spawn Royal Recruits in fixed lane positions with 3-3, 4-2, or 2-4 split"""
+        # Fixed x positions for left and right lanes (evenly spaced within each lane)
+        left_positions = [2.0, 4.0, 6.0, 8.0]  # up to 4 on left
+        right_positions = [10.0, 12.0, 14.0, 16.0]  # up to 4 on right
+
+        # Determine split based on tap x
+        if center_pos.x < 7.5:
+            left_xs = left_positions[:4]
+            right_xs = right_positions[:2]
+        elif center_pos.x > 10.5:
+            left_xs = left_positions[:2]
+            right_xs = right_positions[:4]
+        else:
+            left_xs = left_positions[:3]
+            right_xs = right_positions[:3]
         blocked_ranges = self.arena.get_tower_blocked_x_ranges(center_pos.y, self)
-        
-        # Calculate initial line positions
-        total_width = (count - 1) * spacing
-        leftmost_x = center_pos.x - (total_width / 2)
-        
-        # Generate all recruit X positions
-        recruit_positions = []
-        for i in range(count):
-            recruit_x = leftmost_x + (i * spacing)
-            recruit_positions.append(recruit_x)
-        
-        # Check if any positions would overlap with towers
-        needs_adjustment = False
-        for recruit_x in recruit_positions:
-            for x_min, x_max in blocked_ranges:
-                if x_min <= recruit_x <= x_max:
-                    needs_adjustment = True
-                    break
-            if needs_adjustment:
-                break
-        
-        # If line overlaps with towers, find alternative positioning
-        if needs_adjustment:
-            recruit_positions = self._find_safe_recruit_positions(center_pos, count, spacing, blocked_ranges)
-        
-        # Ensure all positions are within arena bounds
-        recruit_positions = [max(0.5, min(17.5, x)) for x in recruit_positions]
-        
-        # Spawn each recruit
-        for recruit_x in recruit_positions:
-            recruit_pos = Position(recruit_x, center_pos.y)
-            recruit_pos = self._snap_to_valid_position(recruit_pos, player_id)
-            self._spawn_unit_at_position(recruit_pos, player_id, card_stats)
+        all_xs = []
+        for x in left_xs + right_xs:
+            blocked = any(x_min <= x <= x_max for x_min, x_max in blocked_ranges)
+            if blocked:
+                # Nudge away from blocked range
+                for x_min, x_max in blocked_ranges:
+                    if x_min <= x <= x_max:
+                        x = x_max + 1.0 if x > (x_min + x_max) / 2 else x_min - 1.0
+                        break
+            all_xs.append(max(0.5, min(17.5, x)))
+
+        for x in all_xs:
+            pos = Position(x, center_pos.y)
+            self._spawn_single_troop(pos, player_id, card_stats)
     
     def _find_safe_recruit_positions(self, center_pos: Position, count: int, spacing: float, blocked_ranges: List[Tuple[float, float]]) -> List[float]:
         """Find safe X positions for Royal Recruits that avoid tower collisions"""
@@ -622,8 +647,9 @@ class BattleState:
         speed = card_stats.speed or 60.0
         
         # Determine if this is an air unit
-        air_units = ['Minions', 'MinionHorde', 'Balloon', 'SkeletonBalloon', 'BabyDragon', 
-                    'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion']
+        air_units = ['Minions', 'MinionHorde', 'Balloon', 'SkeletonBalloon', 'BabyDragon',
+                     'InfernoDragon', 'ElectroDragon', 'SkeletonDragons', 'MegaMinion', 'DartBarrell',
+                     'Bats', 'LavaHound']
         is_air_unit = card_stats.name in air_units
         
         # Use level-scaled stats for hitpoints and damage

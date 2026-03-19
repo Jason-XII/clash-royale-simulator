@@ -47,6 +47,8 @@ ARENA_Y = 50
 
 class BattleVisualizer:
     def __init__(self):
+        self.paused = False
+        self.speed = 1
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Clash Royale Battle Visualization")
         self.clock = pygame.time.Clock()
@@ -74,29 +76,32 @@ class BattleVisualizer:
         self.tile_height = TILE_SIZE
         
         # Auto-deploy for testing
+        self.scheduled_deploys = []
         self.setup_test_battle()
+
         
     def setup_test_battle(self):
-        """Setup a test battle with units"""
+        """Set up a test battle with units"""
         print("Setting up test battle with corrected arena dimensions...")
         
         # Give players more elixir for testing
+        self.battle.players[0].hand = ['Princess']
+        self.battle.players[0].deck = ['Princess']
+        self.battle.players[1].hand = ['GoblinGang']
+        self.battle.players[1].deck = ['GoblinGang']
+
+
         self.battle.players[0].elixir = 10.0
-        self.battle.players[1].elixir = 10.0
+        self.battle.deploy_card(0, 'Princess', Position(6, 4))
+
+        # Deploy Goblin Gang after 3 seconds
+        # self.scheduled_deploys = [(6.0, 1, 'GoblinGang', Position(4, 28))]
+
         
         # Deploy some units for visualization using corrected positions
         deployments = [
-            # Player 0 (Blue - bottom half, y < 15)
-            (0, 'Knight', Position(8.5, 12), "P0 Knight center"),
-            (0, 'Archers', Position(4, 8), "P0 Archers left"),
-            (0, 'Archers', Position(13, 8), "P0 Archers right"),
-            
-            # Player 1 (Red - top half, y > 16)  
-            (1, 'Knight', Position(8.5, 20), "P1 Knight center"),
-            (1, 'Archers', Position(4, 24), "P1 Archers left"),
-            (1, 'Archers', Position(13, 24), "P1 Archers right"),
         ]
-        
+
         for player_id, card, pos, desc in deployments:
             result = self.battle.deploy_card(player_id, card, pos)
             print(f"  {desc}: {result}")
@@ -563,7 +568,7 @@ class BattleVisualizer:
                     pygame.draw.circle(self.screen, arrow_color, (arrow_target_x, arrow_target_y), 8, 2)
             
             # Entity label (name tag) - draw below the unit
-            label = self.small_font.render(entity_name[:3], True, BLACK)
+            label = self.small_font.render(entity_name, True, BLACK)
             label_rect = label.get_rect(center=(screen_x, screen_y + 25))
             self.screen.blit(label, label_rect)
     
@@ -683,262 +688,10 @@ class BattleVisualizer:
                     self.engine = BattleEngine()
                     self.battle = self.engine.create_battle()
                     self.setup_test_battle()
-                elif event.key >= pygame.K_1 and event.key <= pygame.K_5:
+                elif pygame.K_1 <= event.key <= pygame.K_5:
                     # Set speed multiplier
                     self.speed = event.key - pygame.K_0
-                elif event.key == pygame.K_i:
-                    # Toggle investigation mode
-                    self.investigation_mode = not getattr(self, 'investigation_mode', False)
-                    if self.investigation_mode:
-                        print("🔍 Investigation mode ON - taking screenshots every 30 ticks")
-                        self.investigation_counter = 0
-                        # Create investigation folder
-                        import datetime
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        self.investigation_folder = f"investigation/{timestamp}"
-                        os.makedirs(self.investigation_folder, exist_ok=True)
-                    else:
-                        print("🔍 Investigation mode OFF")
-                elif event.key == pygame.K_s:
-                    # Take single screenshot
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"manual_screenshot_{timestamp}.png"
-                    self.take_screenshot(filename)
-                elif event.key == pygame.K_p:
-                    # Take pathfinding debug screenshot
-                    self.take_pathfinding_debug_screenshot()
-        
         return True
-    
-    def take_screenshot(self, filename: str = "battle_screenshot.png"):
-        """Take a screenshot of the current battle state"""
-        pygame.image.save(self.screen, filename)
-        print(f"📸 Screenshot saved as: {filename}")
-        return filename
-    
-    def take_pathfinding_debug_screenshot(self):
-        """Take a screenshot with pathfinding debug info overlaid"""
-        # Draw pathfinding debug info
-        for entity in self.battle.entities.values():
-            if hasattr(entity, '_get_pathfind_target') and hasattr(entity, 'target_id'):
-                if entity.target_id:
-                    target = self.battle.entities.get(entity.target_id)
-                    if target:
-                        # Get what the pathfinding target would be
-                        pathfind_target = entity._get_pathfind_target(target, self.battle)
-                        
-                        # Draw pathfinding target as bright green circle
-                        screen_x, screen_y = self.world_to_screen(pathfind_target.x, pathfind_target.y)
-                        pygame.draw.circle(self.screen, (0, 255, 0), (screen_x, screen_y), 15, 3)
-                        
-                        # Draw line from entity to pathfind target
-                        entity_x, entity_y = self.world_to_screen(entity.position.x, entity.position.y)
-                        pygame.draw.line(self.screen, (0, 255, 0), (entity_x, entity_y), (screen_x, screen_y), 2)
-                        
-                        # Add text showing pathfind target type
-                        current_side = 0 if entity.position.y < 16.0 else 1
-                        target_side = 0 if target.position.y < 16.0 else 1
-                        need_to_cross = current_side != target_side
-                        distance_to_target = entity.position.distance_to(target.position)
-                        on_bridge = (abs(entity.position.x - 3.0) <= 1.5 or abs(entity.position.x - 14.0) <= 1.5) and abs(entity.position.y - 16.0) <= 1.0
-                        
-                        debug_text = ""
-                        if distance_to_target <= entity.sight_range:
-                            debug_text = "DIRECT"
-                        elif on_bridge:
-                            debug_text = "TO_TOWER"  
-                        elif need_to_cross:
-                            debug_text = "TO_BRIDGE"
-                        else:
-                            debug_text = "DIRECT"
-                            
-                        text_surface = self.font.render(debug_text, True, (0, 255, 0))
-                        self.screen.blit(text_surface, (screen_x + 20, screen_y - 10))
-        
-        pygame.display.flip()
-        
-        # Take screenshot
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"pathfinding_debug_{timestamp}.png"
-        self.take_screenshot(filename)
-    
-    def run_replay_mode(self):
-        """Run battle and screenshot every tick until first attack"""
-        print("🎮 Starting Battle Replay Mode")
-        print("📸 Will screenshot every tick until first attack occurs")
-        
-        # Create replay folder with timestamp
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        replay_folder = f"replay/{timestamp}"
-        os.makedirs(replay_folder, exist_ok=True)
-        
-        print(f"📁 Replay folder: {replay_folder}")
-        
-        tick = 0
-        attack_detected = False
-        
-        # Track initial HP of all entities to detect attacks
-        initial_hp = {}
-        for entity_id, entity in self.battle.entities.items():
-            if hasattr(entity, 'hitpoints'):
-                initial_hp[entity_id] = entity.hitpoints
-        
-        while not attack_detected and tick < 200:  # Max 200 ticks safety limit
-            # Step the battle
-            old_hp = {}
-            for entity_id, entity in self.battle.entities.items():
-                if hasattr(entity, 'hitpoints'):
-                    old_hp[entity_id] = entity.hitpoints
-            
-            self.battle.step(speed_factor=1.0)
-            
-            # Check for attacks (HP changes)
-            for entity_id, entity in self.battle.entities.items():
-                if entity_id in old_hp and hasattr(entity, 'hitpoints'):
-                    if entity.hitpoints < old_hp[entity_id]:
-                        attack_detected = True
-                        print(f"⚔️  Attack detected at tick {tick}! {entity.card_stats.name if entity.card_stats else 'Entity'} took {old_hp[entity_id] - entity.hitpoints} damage")
-                        break
-            
-            # Draw and screenshot
-            self.screen.fill(WHITE)
-            self.draw_arena()
-            self.draw_towers()
-            self.draw_entities()
-            self.draw_ui()
-            
-            # Add tick counter to screen
-            tick_text = self.large_font.render(f"Tick: {tick}", True, BLACK)
-            self.screen.blit(tick_text, (10, 10))
-            
-            pygame.display.flip()
-            
-            # Save screenshot
-            screenshot_path = f"{replay_folder}/tick_{tick:04d}.png"
-            pygame.image.save(self.screen, screenshot_path)
-            
-            tick += 1
-            
-            # Small delay to see progress
-            time.sleep(0.1)
-        
-        print(f"📸 Replay complete! {tick} screenshots saved to {replay_folder}")
-        print(f"🎬 To view replay: open files tick_0000.png through tick_{tick-1:04d}.png")
-        
-        # Keep window open briefly
-        time.sleep(2)
-        pygame.quit()
-        
-        return replay_folder
-    
-    def run_and_screenshot(self):
-        """Run battle for a few steps and take screenshot"""
-        print("🎮 Starting Battle Visualization (Auto-Screenshot Mode)")
-        
-        # Run for a few ticks to get interesting state
-        for i in range(50):
-            self.battle.step(speed_factor=1.0)
-            
-            # Draw everything every 10 ticks to show progression
-            if i % 10 == 0:
-                self.screen.fill(WHITE)
-                self.draw_arena()
-                self.draw_towers() 
-                self.draw_entities()
-                self.draw_ui()
-                pygame.display.flip()
-                
-                if i == 30:  # Take screenshot at tick 30
-                    screenshot_file = self.take_screenshot()
-        
-        # Final screenshot
-        self.screen.fill(WHITE)
-        self.draw_arena()
-        self.draw_towers()
-        self.draw_entities() 
-        self.draw_ui()
-        pygame.display.flip()
-        
-        final_screenshot = self.take_screenshot("final_battle_state.png")
-        
-        # Keep window open briefly to show result
-        time.sleep(2)
-        pygame.quit()
-        
-        return final_screenshot
-    
-    def run_auto_investigation(self, max_ticks=15):
-        """Automatic investigation mode - runs battle and takes screenshots automatically"""
-        print("🔍 Starting automatic pathfinding investigation...")
-        print(f"Will capture ticks 0-{max_ticks} and terminate automatically")
-        
-        # Create investigation folder
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        investigation_folder = f"investigation/{timestamp}"
-        os.makedirs(investigation_folder, exist_ok=True)
-        print(f"📁 Screenshots will be saved to: {investigation_folder}")
-        
-        # Take screenshots for ticks 0-15 only
-        tick = 0
-        
-        # Take initial screenshot before any ticks
-        self.screen.fill(WHITE)
-        self.draw_arena()
-        self.draw_towers()
-        self.draw_entities()
-        self.draw_ui()
-        
-        # Add tick info
-        tick_text = self.large_font.render(f"Tick: {tick}", True, BLACK)
-        self.screen.blit(tick_text, (10, 10))
-        
-        pygame.display.flip()
-        
-        # Take screenshot
-        filename = f"{investigation_folder}/tick_{tick:04d}_initial.png"
-        pygame.image.save(self.screen, filename)
-        print(f"📸 Screenshot: tick_{tick:04d}_initial.png")
-        
-        while tick < 15:
-            # Step battle
-            self.battle.step(speed_factor=1.0)
-            tick += 1
-            
-            # Always take screenshot for ticks 1-15
-            should_screenshot = True
-            step_info = f"step_{tick}"
-            
-            if should_screenshot:
-                # Draw everything
-                self.screen.fill(WHITE)
-                self.draw_arena()
-                self.draw_towers()
-                self.draw_entities()
-                self.draw_ui()
-                
-                # Add tick info
-                tick_text = self.large_font.render(f"Tick: {tick}", True, BLACK)
-                self.screen.blit(tick_text, (10, 10))
-                
-                pygame.display.flip()
-                
-                # Take screenshot
-                filename = f"{investigation_folder}/tick_{tick:04d}_{step_info}.png"
-                pygame.image.save(self.screen, filename)
-                print(f"📸 Screenshot: tick_{tick:04d}_{step_info}.png")
-            
-            # Handle pygame events to prevent window from becoming unresponsive
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    break
-        
-        print(f"✅ Investigation complete! Screenshots saved to {investigation_folder}")
-        pygame.quit()
-        return investigation_folder
     
     def run(self):
         """Main visualization loop"""
@@ -964,7 +717,12 @@ class BattleVisualizer:
             if not self.paused and not self.battle.game_over:
                 for _ in range(self.speed):
                     self.battle.step(speed_factor=1.0)
-                    
+                    for deploy in self.scheduled_deploys[:]:
+                        t, pid, card, pos = deploy
+                        if self.battle.time >= t:
+                            self.battle.deploy_card(pid, card, pos)
+                            self.battle.players[pid].elixir = 10.0
+                            self.scheduled_deploys.remove(deploy)
                 # Investigation mode - take screenshots at intervals
                 if getattr(self, 'investigation_mode', False):
                     if not hasattr(self, 'investigation_counter'):
@@ -1011,33 +769,26 @@ class BattleVisualizer:
         
         pygame.quit()
 
-def main():
-    """Run the battle visualization"""
-    try:
-        visualizer = BattleVisualizer()
-        
-        # Check command line arguments
-        if len(sys.argv) > 1:
-            if sys.argv[1] == "screenshot":
-                screenshot_file = visualizer.run_and_screenshot()
-                return screenshot_file
-            elif sys.argv[1] == "replay":
-                replay_folder = visualizer.run_replay_mode()
-                return replay_folder
-            elif sys.argv[1] == "investigate":
-                investigation_folder = visualizer.run_auto_investigation()
-                return investigation_folder
+
+class CustomBattle(BattleVisualizer):
+    def __init__(self):
+        super().__init__()
+
+    def deploy(self, card_name, coordinates, player=0, interval=0):
+        current_player = self.battle.players[player]
+        current_player.hand = [card_name]
+        current_player.deck = [card_name]
+        current_player.elixir = 10
+        if not interval:
+            self.battle.deploy_card(player, card_name, Position(*coordinates))
         else:
-            visualizer.run()
-            return None
-    except KeyboardInterrupt:
-        print("\nVisualization stopped by user")
-        return None
-    except Exception as e:
-        print(f"Error in visualization: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+            self.scheduled_deploys.append((interval, player, card_name, coordinates))
+
+    def setup_test_battle(self):
+        pass
+
 
 if __name__ == "__main__":
-    main()
+    battle = CustomBattle()
+    battle.deploy('Berserker', (8, 8))
+    battle.run()
