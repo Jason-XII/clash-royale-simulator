@@ -34,6 +34,7 @@ class Card:
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData'))
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
         self.damage = self.data['summonCharacterData'].get('damage', 0)
+        self.lifetime = self.data['summonCharacterData'].get('lifeTime', 0)
 
 class Projectile:
     def __init__(self, projectile_data):

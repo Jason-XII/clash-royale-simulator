@@ -216,19 +216,6 @@ class Troop(Entity):
 
     def _create_projectile(self, target: 'Entity', battle_state: 'BattleState') -> None:
         """Create a projectile towards the target"""
-        projectile_damage = self.data.projectile_data.damage  # Use entity's scaled damage instead of base projectile damage
-        projectile_speed = self.data.projectile_data.speed / 60.0  # Convert from per-minute to per-second
-        splash_radius = self.data.projectile_data.radius / 1000.0
-        target_buff_data = self.data.projectile_data.target_buff
-        slow_duration = self.data.projectile_data.buff_time / 1000.0
-        slow_multiplier = 1.0 + (target_buff_data.get("speedMultiplier", 0) / 100.0)
-        stun_duration = 0.0
-        hits_air = self.data.projectile_data.hits_air
-        hits_ground = self.data.projectile_data.hits_ground
-
-        if self.is_charging and self.data.charge_damage:
-            projectile_damage = self.data.charge_damage
-
         if self.data.name == "Bowler":
             dx, dy = target.position.x - self.position.x, target.position.y - self.position.y
             distance = math.hypot(dx, dy)
@@ -241,10 +228,10 @@ class Troop(Entity):
                 card_stats=self.data,
                 hitpoints=1,
                 max_hitpoints=1,
-                damage=projectile_damage,
-                range=splash_radius,  # Use splash radius as rolling width
+                damage=self.data.projectile_data.damage, # bowler doesn't charge
+                range=self.data.projectile_data.radius / 1000.0,  # Use splash radius as rolling width
                 sight_range=0,
-                travel_speed=projectile_speed * 60.0,  # Convert back to tiles/min for RollingProjectile
+                travel_speed=self.data.projectile_data.speed,  # Convert back to tiles/min for RollingProjectile
                 projectile_range=7.5,  # 7500 game units = 7.5 tiles
                 spawn_delay=0.0,  # No spawn delay for Bowler
                 spawn_character=None,  # Bowler doesn't spawn units
@@ -264,19 +251,19 @@ class Troop(Entity):
                 card_stats=self.data,
                 hitpoints=1,
                 max_hitpoints=1,
-                damage=projectile_damage,
+                damage=self.data.projectile_data.damage,
                 range=self.data.range,
                 sight_range=1.0,
                 target_position=Position(target.position.x, target.position.y),
-                travel_speed=projectile_speed,
-                splash_radius=splash_radius,
+                travel_speed=self.data.projectile_data.speed / 60.0,
+                splash_radius=self.data.projectile_data.radius / 1000.0,
                 source_name=self.data.name,
-                stun_duration=stun_duration,
-                slow_duration=slow_duration,
-                slow_multiplier=max(0.0, slow_multiplier),
+                stun_duration=0,
+                slow_duration=self.data.projectile_data.buff_time / 1000.0,
+                slow_multiplier=max(0.0, 1.0 + (self.data.projectile_data.target_buff.get("speedMultiplier", 0) / 100.0)),
                 knockback_distance=self.data.projectile_data.pushback / 1000.0,
-                hits_air=hits_air,
-                hits_ground=hits_ground,
+                hits_air=self.data.projectile_data.hits_air,
+                hits_ground=self.data.projectile_data.hits_ground,
                 crown_tower_damage_multiplier=1
             )
 
@@ -344,18 +331,10 @@ class Troop(Entity):
         - After first tower destroyed: 1) Troops in FOV, 2) Center bridge, 3) Cross bridge if clear, 4) Target buildings
         """
         final_target = target_entity.position
-        if self.data.is_air_unit:
+        need_to_cross = (self.position.y - 16.0) * (final_target.y - 16.0) < 0
+        if self.data.is_air_unit or not need_to_cross:
             return final_target
-        need_to_cross = (self.position.y - 16.0)*(final_target.y - 16.0) < 0
-        if not need_to_cross:
-            return final_target
-        total = 0
-        for player in battle_state.players:
-            total += int(player.left_tower_hp > 0) + int(player.right_tower_hp > 0)
-        if total < 4: # At least a tower is destroyed, needs more advanced pathfinding
-            return self._get_advanced_pathfind_target(target_entity)
-        else:
-            return self._get_basic_pathfind_target()
+        return self._get_basic_pathfind_target()
 
     def _get_basic_pathfind_target(self) -> Position:
         """Original pathfinding logic before first tower is destroyed"""
@@ -370,188 +349,50 @@ class Troop(Entity):
         else:
             possible_x = [2, 3, 4, 13, 14, 15]
             return Position(max(possible_x, key=lambda x: abs(self.position.x - x)), 16.0)
-
-    def _get_advanced_pathfind_target(self, target_entity: 'Entity') -> Position:
-        """Advanced pathfinding logic after first tower is destroyed"""
-        final_target = target_entity.position
-        near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
-
-        # Check if we're on either bridge
-        on_left_bridge = (abs(self.position.x - 3.5) <= 1.5 and abs(self.position.y - 16.0) <= 1.0)
-        on_right_bridge = (abs(self.position.x - 14.5) <= 1.5 and abs(self.position.y - 16.0) <= 1.0)
-        on_bridge = on_left_bridge or on_right_bridge
-
-        if on_bridge:
-            # On center bridge - decide whether to cross or target what's visible
-
-            # Check if target is a building (tower or other structure)
-            is_building = isinstance(target_entity, Building)
-
-            if is_building:
-                # Check if we can see the building (it's in line of sight)
-                distance_to_target = self.position.distance_to(final_target)
-                if distance_to_target <= self.sight_range:
-                    # Building is in line of sight - go directly to it
-                    return final_target
-                else:
-                    # Building not in sight - cross the bridge and move forward
-                    if self.player_id == 0:  # Blue player crossing to red side
-                        # Move forward from bridge towards red side
-                        if on_left_bridge:
-                            return Position(3.5, 20.0)  # Forward from left bridge
-                        else:
-                            return Position(14.5, 20.0)  # Forward from right bridge
-                    else:  # Red player crossing to blue side
-                        # Move forward from bridge towards blue side
-                        if on_left_bridge:
-                            return Position(3.5, 12.0)  # Forward from left bridge
-                        else:
-                            return Position(14.5, 12.0)  # Forward from right bridge
-            else:
-                # Target is a troop - if in line of sight, go directly
-                distance_to_target = self.position.distance_to(final_target)
-                if distance_to_target <= self.sight_range:
-                    return final_target
-                else:
-                    # Cross bridge to get closer to target
-                    if self.player_id == 0:
-                        if on_left_bridge:
-                            return Position(3.5, 20.0)  # Move from left bridge towards red side
-                        else:
-                            return Position(14.5, 20.0)  # Move from right bridge towards red side
-                    else:
-                        if on_left_bridge:
-                            return Position(3.5, 12.0)  # Move from left bridge towards blue side
-                        else:
-                            return Position(14.5, 12.0)  # Move from right bridge towards blue side
-        else:
-            # Not on bridge yet - check if we need to route around river
-            # Direct path to bridge might cross river, so use intermediate waypoint
-
-            # Check if we're on the same side as the chosen bridge
-            if chosen_bridge.x == 3.5:  # Left bridge
-                # For left bridge, approach from left side on land
-                bridge_approach = Position(3.5, 14.0) if self.player_id == 0 else Position(3.5, 18.0)
-            else:  # Right bridge
-                # For right bridge, approach from right side on land
-                bridge_approach = Position(14.5, 14.0) if self.player_id == 0 else Position(14.5, 18.0)
-
-            # Check if we can reach the bridge approach position directly
-            approach_distance = self.position.distance_to(bridge_approach)
-            bridge_distance = self.position.distance_to(chosen_bridge)
-
-            # Always use approach waypoint if we're not already close to the bridge
-            # This prevents diagonal paths through the river
-            if bridge_distance > 2.0:  # If more than 2 tiles away from bridge
-                return bridge_approach
-            else:
-                return chosen_bridge
   
 
-@dataclass
 class Building(Entity):
-    speed: float = 0.0  # Buildings don't move
-    lifetime_elapsed: float = 0.0
+    def __init__(self, id, position, player, card_name, mechanics):
+        super().__init__(id, position, player, card_name, mechanics)
+        self.deploy_delay_remaining = self.data.deploy_time
+        self.lifetime_elapsed = 0.0
+        self.target_id = None
     
     def update(self, dt: float, battle_state: 'BattleState') -> None:
         """Update building - only attack, no movement"""
-        if not self.is_alive:
-            return
-
+        if not self.is_alive or self.stun_timer > 0: return
+        if self.data.name == 'KingTower' and not self.tower_active: return
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return
-
-        if getattr(self, "_is_king_tower", False) and not getattr(self, "_tower_active", True):
-            return
-
-        # Update status effects
         self.update_status_effects(dt)
-
-        # Call on_tick for all mechanics
         for mechanic in self.mechanics:
-            mechanic.on_tick(self, dt * 1000)  # Convert to ms
-
-        # Lifetime handling: decay HP proportional to elapsed time
-        lifetime_ms = getattr(self.card_stats, 'lifetime_ms', None)
-        if lifetime_ms and lifetime_ms > 0:
-            decay = (self.max_hitpoints / float(lifetime_ms)) * (dt * 1000.0)
-            if decay > 0:
-                self.take_damage(decay)
-                if not self.is_alive:
-                    return
-
-        # If stunned, can't attack
-        if self.stun_timer > 0:
-            return
-        
-        # Update attack cooldown and track time for visualization
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= dt * self.get_attack_rate_multiplier()
-        
-        # Update last attack time for visualization tracking
-        self.last_attack_time += dt
-        
-        # Find and attack target
+            mechanic.on_tick(self, dt * 1000)
+        if self.data.lifetime > 0:
+            decay = (self.data.hp / float(self.data.lifetime)) * (dt * 1000.0)
+            self.take_damage(decay)
+        if self.attack_cooldown > 0: self.attack_cooldown -= dt * (self.attack_speed_debuff * self.attack_speed_buff)
         target = self.get_nearest_target(battle_state.entities)
         self.target_id = target.id if target else None
         if target and self.can_attack_target(target) and self.attack_cooldown <= 0:
-            # Call on_attack_start for all mechanics
             for mechanic in self.mechanics:
                 mechanic.on_attack_start(self, target)
-
-            # Check if this building uses projectiles
-            if self._uses_projectiles():
+            if self.data.projectiles:
                 self._create_projectile(target, battle_state)
             else:
-                # Direct attack
-                self._deal_attack_damage(target, self.damage, battle_state)
-
-            # Call on_attack_hit for all mechanics
+                self._deal_attack_damage(target, self.data.damage, battle_state)
             for mechanic in self.mechanics:
                 mechanic.on_attack_hit(self, target)
-
-            self.attack_cooldown = self.get_attack_interval_seconds()
-            self.last_attack_time = 0.0  # Reset for visualization
-    
-    def _uses_projectiles(self) -> bool:
-        """Check if this building uses projectiles for attacks"""
-        return (self.card_stats and 
-                hasattr(self.card_stats, 'projectile_data') and 
-                self.card_stats.projectile_data is not None)
+            self.attack_cooldown = 1 / (self.data.hit_speed*self.attack_speed_buff*self.attack_speed_debuff/1000)
     
     def _create_projectile(self, target: 'Entity', battle_state: 'BattleState') -> None:
         """Create a projectile towards the target"""
-        if not self.card_stats or not self.card_stats.projectile_data:
-            # Fallback to direct attack if no projectile data
-            # Call on_attack_start for all mechanics
-            for mechanic in self.mechanics:
-                mechanic.on_attack_start(self, target)
-
-            target.take_damage(self.damage)
-
-            # Call on_attack_hit for all mechanics
-            for mechanic in self.mechanics:
-                mechanic.on_attack_hit(self, target)
-            return
-        
-        # Get projectile properties
-        projectile_data = self.card_stats.projectile_data
-        projectile_damage = self.damage  # Use entity's scaled damage instead of base projectile damage
-        projectile_speed = projectile_data.get('speed', 500) / 60.0  # Convert from per-minute to per-second
-        splash_radius = projectile_data.get('radius', 0) / 1000.0 if projectile_data.get('radius') else 0.0
-        target_buff_data = projectile_data.get("targetBuffData") or {}
-        slow_duration = projectile_data.get("buffTime", 0) / 1000.0
+        projectile_speed = self.data.projectile_data.speed / 60.0  # Convert from per-minute to per-second
+        splash_radius = self.data.projectile_data.radius / 1000.0
+        target_buff_data = self.data.projectile_data.target_buff
+        slow_duration = self.data.projectile_data.buff_time / 1000
         slow_multiplier = 1.0 + (target_buff_data.get("speedMultiplier", 0) / 100.0)
         stun_duration = 0.0
-        if (
-            target_buff_data.get("speedMultiplier") == -100
-            and target_buff_data.get("hitSpeedMultiplier") == -100
-            and slow_duration > 0
-        ):
-            stun_duration = slow_duration
-            slow_duration = 0.0
-            slow_multiplier = 1.0
         tid_target = projectile_data.get("tidTarget", "TID_TARGETS_AIR_AND_GROUND")
         hits_air = "AIR" in tid_target
         hits_ground = ("GROUND" in tid_target) or ("BUILDINGS" in tid_target)
