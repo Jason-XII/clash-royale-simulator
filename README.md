@@ -8,7 +8,7 @@ However, a simulator is needed to speed up training. I searched on GitHub and th
 was samdickson22's [repository](https://github.com/samdickson22/clash-simulator). 
 
 I did some investigation and found that although the simulator has most clash royale's features
-implemented, the code is almost completely written by AI - hard to read and make improvements on the code.
+implemented, the code is almost completely written by AI - hard to read and impossible for humans to make improvements on the code.
 
 After examining the project structure more closely, I think I can make it better. So I started 
 systematically going through the code and replacing the AI slop with my own implementations
