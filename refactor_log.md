@@ -15,6 +15,7 @@
 - Removed the "temporary buff" judgement in `entities.py`. May cause problems.
 - Targets troops more than buildings? Is that true?
 - targeting uses `sorted` to sort by distance, which may cause problems.
+- "Apply projectile knockback" may be buggy if the result tile is not walkable.
 
 ## card_factory.py
 Fixed possible bug in `_determine_card_kind`: 

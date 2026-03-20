@@ -407,18 +407,7 @@ class Projectile(Entity):
 
     def _hitbox_overlaps_with_splash(self, entity: 'Entity') -> bool:
         """Check if entity's hitbox overlaps with splash damage radius"""
-        # Get entity collision radius (default to 0.5 tiles if not specified or None)
-        if entity.card_stats and hasattr(entity.card_stats,
-                                         'collision_radius') and entity.card_stats.collision_radius is not None:
-            entity_radius = entity.card_stats.collision_radius
-        else:
-            entity_radius = 0.5
-
-        # Calculate distance between projectile impact and entity center
-        distance = entity.position.distance_to(self.target_position)
-
-        # Check if splash radius overlaps with entity hitbox
-        return distance <= (self.splash_radius + entity_radius)
+        return entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius)
     
     def _deal_splash_damage(self, battle_state: 'BattleState') -> None:
         """Deal damage to entities in splash radius using hitbox overlap detection"""
@@ -429,15 +418,10 @@ class Projectile(Entity):
             
             # Use hitbox-based collision detection for more accurate splash damage
             if self._hitbox_overlaps_with_splash(entity):
-                damage = self.damage
-                if isinstance(entity, Building) and getattr(entity.card_stats, 'name', None) in {"Tower", "KingTower"}:
-                    damage *= self.crown_tower_damage_multiplier
-                entity.take_damage(damage)
-                if self.stun_duration > 0:
-                    entity.apply_stun(self.stun_duration)
-                if self.slow_duration > 0 and self.slow_multiplier < 1.0:
-                    entity.apply_slow(self.slow_duration, self.slow_multiplier)
-                if self.knockback_distance > 0 and not isinstance(entity, Building):
+                entity.take_damage(self.proj.damage)
+                if slow:=self.proj.target_buff.get('speedMultiplier'):
+                    entity.apply_slow(self.proj.buff_time, slow)
+                if self.proj.pushback > 0 and not isinstance(entity, Building):
                     self._apply_knockback(entity, battle_state)
 
     def _apply_knockback(self, entity: 'Entity', battle_state: 'BattleState') -> None:
@@ -445,13 +429,13 @@ class Projectile(Entity):
         dx = entity.position.x - self.target_position.x
         dy = entity.position.y - self.target_position.y
         distance = math.hypot(dx, dy)
-        if distance == 0:
-            return
+        if distance == 0: return
         new_position = Position(
-            entity.position.x + (dx / distance) * self.knockback_distance,
-            entity.position.y + (dy / distance) * self.knockback_distance,
+            entity.position.x + (dx / distance) * self.proj.pushback,
+            entity.position.y + (dy / distance) * self.proj.pushback,
         )
-        if getattr(entity, "is_air_unit", False) or battle_state.is_ground_position_walkable(new_position, entity):
+        # This might be buggy. What if the position is not walkable?
+        if battle_state.is_ground_position_walkable(new_position, entity):
             entity.position = new_position
 
 @dataclass
