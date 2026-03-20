@@ -6,7 +6,7 @@
 - `player.py` finished. 78 → 37 lines
 - created `card_utils.py`
 - deleted the `factory` directory and `data.py`
-- completely refactored `entities.py`'s `Entity` base class, from 372 lines to 154 lines.
+- completely refactored `entities.py`'s `Entity`, `Troop`, `Building` base class, from 1030 lines to 380 lines.
 
 ## Caveats
 

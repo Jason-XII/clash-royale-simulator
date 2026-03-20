@@ -247,24 +247,8 @@ class Troop(Entity):
             projectile = Projectile(
                 id=battle_state.next_entity_id,
                 position=Position(self.position.x, self.position.y),
-                player_id=self.player,
-                card_stats=self.data,
-                hitpoints=1,
-                max_hitpoints=1,
-                damage=self.data.projectile_data.damage,
-                range=self.data.range,
-                sight_range=1.0,
+                player=self.player, source_card_name=self.data.name,
                 target_position=Position(target.position.x, target.position.y),
-                travel_speed=self.data.projectile_data.speed / 60.0,
-                splash_radius=self.data.projectile_data.radius / 1000.0,
-                source_name=self.data.name,
-                stun_duration=0,
-                slow_duration=self.data.projectile_data.buff_time / 1000.0,
-                slow_multiplier=max(0.0, 1.0 + (self.data.projectile_data.target_buff.get("speedMultiplier", 0) / 100.0)),
-                knockback_distance=self.data.projectile_data.pushback / 1000.0,
-                hits_air=self.data.projectile_data.hits_air,
-                hits_ground=self.data.projectile_data.hits_ground,
-                crown_tower_damage_multiplier=1
             )
 
             battle_state.entities[projectile.id] = projectile
@@ -387,73 +371,27 @@ class Building(Entity):
     
     def _create_projectile(self, target: 'Entity', battle_state: 'BattleState') -> None:
         """Create a projectile towards the target"""
-        projectile_speed = self.data.projectile_data.speed / 60.0  # Convert from per-minute to per-second
-        splash_radius = self.data.projectile_data.radius / 1000.0
-        target_buff_data = self.data.projectile_data.target_buff
-        slow_duration = self.data.projectile_data.buff_time / 1000
-        slow_multiplier = 1.0 + (target_buff_data.get("speedMultiplier", 0) / 100.0)
-        stun_duration = 0.0
-        tid_target = projectile_data.get("tidTarget", "TID_TARGETS_AIR_AND_GROUND")
-        hits_air = "AIR" in tid_target
-        hits_ground = ("GROUND" in tid_target) or ("BUILDINGS" in tid_target)
-        if tid_target == "TID_TARGETS_GROUND":
-            hits_air = False
-            hits_ground = True
-        crown_tower_damage_multiplier = max(
-            0.0, 1.0 + (projectile_data.get("crownTowerDamagePercent", 0) / 100.0)
-        )
-        
-        # Create projectile entity
         projectile = Projectile(
-            id=battle_state.next_entity_id,
-            position=Position(self.position.x, self.position.y),
-            player_id=self.player_id,
-            card_stats=self.card_stats,
-            hitpoints=1,
-            max_hitpoints=1,
-            damage=projectile_damage,
-            range=self.range,
-            sight_range=1.0,
+            id=battle_state.next_entity_id, position=Position(self.position.x, self.position.y),
+            player=self.player, source_card_name=self.data.name,
             target_position=Position(target.position.x, target.position.y),
-            travel_speed=projectile_speed,
-            splash_radius=splash_radius,
-            source_name=self.card_stats.name if self.card_stats else "Unknown",
-            stun_duration=stun_duration,
-            slow_duration=slow_duration,
-            slow_multiplier=max(0.0, slow_multiplier),
-            knockback_distance=projectile_data.get("pushback", 0) / 1000.0,
-            hits_air=hits_air,
-            hits_ground=hits_ground,
-            crown_tower_damage_multiplier=crown_tower_damage_multiplier,
         )
-        
         battle_state.entities[projectile.id] = projectile
         battle_state.next_entity_id += 1
 
 
-@dataclass
 class Projectile(Entity):
-    target_position: Position = field(default_factory=lambda: Position(0, 0))
-    travel_speed: float = 5.0
-    splash_radius: float = 0.0
-    source_name: str = "Unknown"  # Name of unit that fired this projectile
-    stun_duration: float = 0.0
-    slow_duration: float = 0.0
-    slow_multiplier: float = 1.0
-    knockback_distance: float = 0.0
-    hits_air: bool = True
-    hits_ground: bool = True
-    crown_tower_damage_multiplier: float = 1.0
+    def __init__(self, id, position, player, source_card_name, target_position):
+        # No mechanics field for projectile
+        super().__init__(id, position, player, source_card_name, [])
+        self.target_position = target_position
+        self.proj = self.data.projectile_data # a shortcut
     
     def update(self, dt: float, battle_state: 'BattleState') -> None:
         """Update projectile - move towards target"""
-        if not self.is_alive:
-            return
-        
-        # Move towards target
+        if not self.is_alive: return
         distance = self.position.distance_to(self.target_position)
-        if distance <= self.travel_speed * dt:
-            # Reached target - deal damage
+        if distance <= self.proj.speed * dt:
             self._deal_splash_damage(battle_state)
             self.is_alive = False
         else:
@@ -461,29 +399,33 @@ class Projectile(Entity):
     
     def _move_towards(self, target_pos: Position, dt: float) -> None:
         """Move towards target position"""
-        dx = target_pos.x - self.position.x
-        dy = target_pos.y - self.position.y
-        distance = (dx * dx + dy * dy) ** 0.5
-        
-        if distance > 0:
-            move_distance = self.travel_speed * dt
-            move_x = (dx / distance) * move_distance
-            move_y = (dy / distance) * move_distance
-            
-            self.position.x += move_x
-            self.position.y += move_y
+        # Note: I used a much cleaner way of writing the code.
+        direction = complex(target_pos.x - self.position.x, target_pos.y - self.position.y)
+        step = direction / abs(direction) * self.proj.speed * dt
+        self.position.x += step.real
+        self.position.y += step.imag
+
+    def _hitbox_overlaps_with_splash(self, entity: 'Entity') -> bool:
+        """Check if entity's hitbox overlaps with splash damage radius"""
+        # Get entity collision radius (default to 0.5 tiles if not specified or None)
+        if entity.card_stats and hasattr(entity.card_stats,
+                                         'collision_radius') and entity.card_stats.collision_radius is not None:
+            entity_radius = entity.card_stats.collision_radius
+        else:
+            entity_radius = 0.5
+
+        # Calculate distance between projectile impact and entity center
+        distance = entity.position.distance_to(self.target_position)
+
+        # Check if splash radius overlaps with entity hitbox
+        return distance <= (self.splash_radius + entity_radius)
     
     def _deal_splash_damage(self, battle_state: 'BattleState') -> None:
         """Deal damage to entities in splash radius using hitbox overlap detection"""
         for entity in list(battle_state.entities.values()):
-            if entity.player_id == self.player_id or not entity.is_alive:
-                continue
-
-            is_air = getattr(entity, 'is_air_unit', False)
-            if is_air and not self.hits_air:
-                continue
-            if (not is_air) and not self.hits_ground:
-                continue
+            if entity.player == self.player or not entity.is_alive: continue
+            if entity.data.is_air_unit and not self.proj.hits_air: continue
+            if (not self.proj.is_air) and not self.proj.hits_ground: continue
             
             # Use hitbox-based collision detection for more accurate splash damage
             if self._hitbox_overlaps_with_splash(entity):
@@ -511,23 +453,6 @@ class Projectile(Entity):
         )
         if getattr(entity, "is_air_unit", False) or battle_state.is_ground_position_walkable(new_position, entity):
             entity.position = new_position
-    
-    def _hitbox_overlaps_with_splash(self, entity: 'Entity') -> bool:
-        """Check if entity's hitbox overlaps with splash damage radius"""
-        # Get entity collision radius (default to 0.5 tiles if not specified or None)
-        if entity.card_stats and hasattr(entity.card_stats, 'collision_radius') and entity.card_stats.collision_radius is not None:
-            entity_radius = entity.card_stats.collision_radius
-        else:
-            entity_radius = 0.5
-        
-        # Calculate distance between projectile impact and entity center
-        distance = entity.position.distance_to(self.target_position)
-        
-        # Check if splash radius overlaps with entity hitbox
-        return distance <= (self.splash_radius + entity_radius)
-
-
-
 
 @dataclass
 class AreaEffect(Entity):
