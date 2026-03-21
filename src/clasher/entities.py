@@ -1,3 +1,5 @@
+import random
+
 from card_utils import Card
 import math
 from .battle import BattleState
@@ -438,168 +440,104 @@ class Projectile(Entity):
         if battle_state.is_ground_position_walkable(new_position, entity):
             entity.position = new_position
 
-@dataclass
+
 class AreaEffect(Entity):
     """Area effect spells that stay on the ground for a duration"""
-    duration: float = 4.0
-    freeze_effect: bool = False
-    speed_multiplier: float = 1.0
-    radius: float = 3.0
-    time_alive: float = 0.0
-    hits_air: bool = True
-    hits_ground: bool = True
-    crown_tower_damage_multiplier: float = 1.0
-    building_damage_multiplier: float = 1.0
-    
-    # Tornado-specific properties
-    pull_force: float = 0.0
-    is_tornado: bool = False
+    def __init__(self, id, position, player, card_name):
+        super().__init__(id, position, player, card_name, [])
+        self.time_alive = 0.0
+        self.effect = self.data.area_effect_data
+        self.pull_force = 1
+
     
     def update(self, dt: float, battle_state: 'BattleState') -> None:
         """Update area effect - apply effects and check duration"""
-        if not self.is_alive:
-            return
-        
+        if not self.is_alive: return
         self.time_alive += dt
-        
-        # Check if duration expired
-        if self.time_alive >= self.duration:
+
+        if self.time_alive >= self.effect.duration:
             self.is_alive = False
             return
-        
-        # Apply effects to entities in radius
-        for entity in list(battle_state.entities.values()):
-            if entity.player_id == self.player_id or not entity.is_alive or entity == self:
-                continue
 
-            is_air = getattr(entity, 'is_air_unit', False)
-            if is_air and not self.hits_air:
-                continue
-            if (not is_air) and not self.hits_ground:
-                continue
-            
-            # Use hitbox-based collision detection  
+        for entity in list(battle_state.entities.values()):
+            if entity.player == self.player or not entity.is_alive or entity == self: continue
+            if self.data.is_air_unit and not self.data.attack_air: continue
+            if (not self.data.is_air_unit) and not self.data.attack_ground: continue
             if self._hitbox_overlaps_with_radius(entity):
                 distance = entity.position.distance_to(self.position)
-                
-                # Apply tornado pull effect
-                if self.is_tornado and self.pull_force > 0:
+                if self.card_name == 'Tornado':
                     self._apply_tornado_pull(entity, distance, dt, battle_state)
-                
-                if self.freeze_effect:
+                if self.card_name == 'Freeze':
                     entity.apply_stun(max(dt, 0.1))
                     entity.apply_slow(max(dt, 0.1), 0.0)
-                elif self.speed_multiplier < 1.0:
-                    entity.apply_slow(max(dt, 0.25), self.speed_multiplier)
+                else:
+                    entity.apply_slow(max(dt, 0.25), self.effect.speed_multiplier)
                 
                 # Apply damage over time (small damage each tick)
-                if self.damage > 0:
-                    damage = self.damage * dt
+                if self.effect.damage > 0:
+                    damage = self.effect.damage * dt
                     if isinstance(entity, Building):
-                        damage *= self.building_damage_multiplier
-                        if getattr(entity.card_stats, 'name', None) in {"Tower", "KingTower"}:
-                            damage *= self.crown_tower_damage_multiplier
+                        damage *= 3.5 if self.data.name == 'Earthquake' else 1.0
+                        if self.data.name in {"Tower", "KingTower"}:
+                            damage *= self.effect.crown_tower_damage_percent
                     entity.take_damage(damage)
 
     def _apply_tornado_pull(self, entity: 'Entity', distance: float, dt: float, battle_state: 'BattleState') -> None:
         """Pull entity towards tornado center"""
         if distance == 0:
             return
-        
-        # Calculate pull vector towards tornado center
         dx = self.position.x - entity.position.x
         dy = self.position.y - entity.position.y
-        
-        # Normalize and apply pull force
         pull_distance = self.pull_force * dt
-        
-        # Don't pull past the center
+
         if pull_distance > distance:
             pull_distance = distance * 0.9  # Stop just short of center
-        
         pull_x = (dx / distance) * pull_distance
         pull_y = (dy / distance) * pull_distance
-        
-        # Apply pull movement (air units can be pulled anywhere, ground units need walkable space)
         new_position = Position(entity.position.x + pull_x, entity.position.y + pull_y)
-        
-        if getattr(entity, 'is_air_unit', False) or battle_state.is_ground_position_walkable(new_position, entity):
+        if entity.data.is_air_unit or battle_state.is_ground_position_walkable(new_position, entity):
             entity.position.x += pull_x
             entity.position.y += pull_y
     
     def _hitbox_overlaps_with_radius(self, entity: 'Entity') -> bool:
         """Check if entity's hitbox overlaps with area effect radius"""
-        # Get entity collision radius (default to 0.5 tiles if not specified or None)
-        if entity.card_stats and hasattr(entity.card_stats, 'collision_radius') and entity.card_stats.collision_radius is not None:
-            entity_radius = entity.card_stats.collision_radius
-        else:
-            entity_radius = 0.5
-        
-        # Calculate distance between area center and entity center
         distance = entity.position.distance_to(self.position)
-        
-        # Check if area radius overlaps with entity hitbox
-        return distance <= (self.radius + entity_radius)
+        return distance <= (self.data.collision_radius + entity.data.collision_radius)
 
 
-@dataclass
 class SpawnProjectile(Projectile):
     """Projectile that spawns units when it reaches target"""
-    spawn_count: int = 3
-    spawn_character: str = "Goblin"
-    spawn_character_data: dict = None
-    activation_delay: float = 0.0
-    time_alive: float = 0.0
+    def __init__(self, id, position, player, target_position, card_name='GoblinBarrel'):
+        super().__init__(id, position, player, card_name, target_position)
+        self.spawn_count = 3
+        self.spawn_character = "Goblin"
+        self.spawn_character_data = None
+        self.activation_delay = 0.0
+        self.time_alive  = 0.0
     
     def update(self, dt: float, battle_state: 'BattleState') -> None:
         """Update projectile - move towards target and spawn units on impact"""
-        if not self.is_alive:
-            return
-
+        if not self.is_alive: return
         self.time_alive += dt
-        if self.time_alive < self.activation_delay:
-            return
-        
-        # Move towards target
+        if self.time_alive < self.activation_delay: return
         distance = self.position.distance_to(self.target_position)
-        if distance <= self.travel_speed * dt:
-            # Reached target - spawn units and deal splash damage
+        if distance <= self.proj.speed * dt:
             self._spawn_units(battle_state)
-            self._deal_splash_damage(battle_state)
             self.is_alive = False
         else:
             self._move_towards(self.target_position, dt)
     
     def _spawn_units(self, battle_state: 'BattleState') -> None:
         """Spawn units at target position"""
-        import math
-        import random
-        
-        if not self.spawn_character_data:
-            return
-        
-        spawn_stats = troop_from_character_data(
-            self.spawn_character,
-            self.spawn_character_data,
-            elixir=0,
-            rarity=self.spawn_character_data.get("rarity", "Common"),
-        )
-        
-        # Spawn units in a small radius around target
         spawn_radius = 1.0  # tiles
-        
         for _ in range(self.spawn_count):
-            # Random position around the target location
             angle = random.random() * 2 * math.pi
             distance = random.random() * spawn_radius
             spawn_x = self.target_position.x + distance * math.cos(angle)
             spawn_y = self.target_position.y + distance * math.sin(angle)
-            
-            # Create and spawn the unit
-            battle_state._spawn_troop(Position(spawn_x, spawn_y), self.player_id, spawn_stats)
+            battle_state._spawn_troop(Position(spawn_x, spawn_y), self.player)
 
 
-@dataclass
 class RollingProjectile(Entity):
     """Rolling projectiles that spawn at location and roll forward (Log, Barbarian Barrel)"""
     travel_speed: float = 200.0

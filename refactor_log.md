@@ -6,7 +6,7 @@
 - `player.py` finished. 78 → 37 lines
 - created `card_utils.py`
 - deleted the `factory` directory and `data.py`
-- completely refactored `entities.py`'s `Entity`, `Troop`, `Building` base class, from 1030 lines to 380 lines.
+- completely refactored `entities.py`'s `Entity`, `Troop`, `Building` base class, from 1232 lines to 503 lines.
 
 ## Caveats
 
@@ -16,6 +16,9 @@
 - Targets troops more than buildings? Is that true?
 - targeting uses `sorted` to sort by distance, which may cause problems.
 - "Apply projectile knockback" may be buggy if the result tile is not walkable.
+- Same issue with tornado pull: if not walkable then doesn't apply pull at all.
+- Don't know where tornado's pull force is defined. Defaulting to 1 for now.
+- `BattleState` needs to be further investigated.
 
 ## card_factory.py
 Fixed possible bug in `_determine_card_kind`: 

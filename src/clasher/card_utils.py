@@ -32,6 +32,7 @@ class Card:
         self.charge_range = self.data['summonCharacterData'].get('chargeRange')
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData'))
+        self.area_effect_data = AreaEffectData(self.data.get('areaEffectObjectData', {}))
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
         self.damage = self.data['summonCharacterData'].get('damage', 0)
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', 0)
@@ -47,6 +48,15 @@ class Projectile:
         self.hits_air = 'AIR' in self.data.get('tidTarget')
         self.hits_ground = 'GROUND' in self.data.get('tidTarget') or 'BUILDING' in self.data.get('tidTarget')
         self.pushback = self.data.get('pushback', 0)
+
+class AreaEffectData:
+    def __init__(self, area_effect_data):
+        self.data = area_effect_data
+        self.duration = self.data.get('lifeDuration')
+        self.buff_data = self.data.get('buffData', {})
+        self.speed_multiplier = self.buff_data.get('speedMultiplier')
+        self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
+
 
 
 
