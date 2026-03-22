@@ -6,49 +6,42 @@ import copy
 import json
 
 from .entities import Entity, Troop, Building
-from .player import PlayerState
 from .arena import TileGrid, Position
 from .spells import SPELL_REGISTRY
 from .mechanics.shared.death_effects import DeathSpawn
 
+# What `BattleState` should do:
+# - at first, initialize princess towers and king towers for both sides
+# - handle entity spawning
+# - update entities at every tick, remove dead entities
+# - end the game when time is appropriate
+
 
 @dataclass
 class BattleState:
-    # Core state
-    entities: Dict[int, Entity] = field(default_factory=dict)
-    players: List[PlayerState] = field(default_factory=lambda: [PlayerState(0), PlayerState(1)])
-    arena: TileGrid = field(default_factory=TileGrid)
-    
-    # Timing
-    time: float = 0.0
-    tick: int = 0
-    dt: float = 0.033  # 33ms per tick (~30 FPS)
-    
-    # Game state
-    double_elixir: bool = False
-    triple_elixir: bool = False
-    overtime: bool = False
-    sudden_death: bool = False
-    game_over: bool = False
-    winner: Optional[int] = None
-    overtime_start_time: float = 240.0
-    sudden_death_start_time: float = 300.0
-    tiebreaker_time: float = 360.0
-    
-    # Data
-    card_loader: CardDataLoader = field(default_factory=CardDataLoader)
-    next_entity_id: int = 1
-    _starting_total_tower_hp: Dict[int, float] = field(default_factory=dict, init=False)
-    _sudden_death_crowns: Tuple[int, int] = field(default=(0, 0), init=False)
+    def __init__(self):
+        self.entities = {}
+        self.players = []
+        self.arena = TileGrid()
+
+        self.time = 0.0
+        self.tick = 0
+        self.dt = 1 / 30  # 33ms per tick (~30 FPS)
+
+        self.game_over = False
+        self.winner = None
+
+        self.next_entity_id = 1
+
+    def _spawn_entity(self, entity):
+        """Spawn any type of entity"""
+        entity.battle_state = self
+        self.entities[self.next_entity_id] = entity
+        self.next_entity_id += 1
+        entity.on_spawn()
     
     def __post_init__(self) -> None:
         """Initialize battle state"""
-        self.card_loader.load_cards()
-        # Preload factory card definitions to enable mechanic detection/prints
-        try:
-            self.card_loader.load_card_definitions()
-        except Exception as e:
-            print(f"[Warn] load_card_definitions failed: {e}")
         self._create_towers()
         self._starting_total_tower_hp = {
             0: self.players[0].king_tower_hp + self.players[0].left_tower_hp + self.players[0].right_tower_hp,
@@ -764,51 +757,7 @@ class BattleState:
             collision_radius_tiles=0.5,
         )
     
-    def _spawn_entity(self, entity_class, position: Position, player_id: int, card_stats: CardStatsCompat) -> Entity:
-        """Spawn any type of entity"""
-        # Use level-scaled stats for hitpoints and damage
-        scaled_hp = card_stats.scaled_hitpoints or 100
-        scaled_damage = card_stats.scaled_damage or 10
 
-        entity = entity_class(
-            id=self.next_entity_id,
-            position=position,
-            player_id=player_id,
-            card_stats=card_stats,
-            hitpoints=scaled_hp,
-            max_hitpoints=scaled_hp,
-            damage=scaled_damage,
-            range=card_stats.range or 100,
-            sight_range=card_stats.sight_range or 500
-        )
-
-        entity.deploy_delay_remaining = max(0.0, (getattr(card_stats, "deploy_time", 0) or 0) / 1000.0)
-        entity.attack_cooldown = max(entity.attack_cooldown, (getattr(card_stats, "load_time", 0) or 0) / 1000.0)
-
-        # Add battle_state reference for mechanics
-        entity.battle_state = self
-
-        # Attach mechanics if using compat wrapper with card_definition
-        if hasattr(card_stats, 'card_definition') and getattr(card_stats, 'card_definition'):
-            entity.mechanics = [copy.deepcopy(m) for m in card_stats.card_definition.mechanics]
-            for mech in entity.mechanics:
-                mech.on_attach(entity)
-            if entity.mechanics:
-                print(f"[Attach] {getattr(card_stats, 'name', 'Building')}: {len(entity.mechanics)} mechanic(s)")
-
-        self.entities[self.next_entity_id] = entity
-        self.next_entity_id += 1
-
-        if isinstance(entity, Building) and getattr(card_stats, "name", "") == "KingTower":
-            entity._tower_active = False
-            entity._is_king_tower = True
-        elif isinstance(entity, Building):
-            entity._tower_active = True
-            entity._is_king_tower = False
-
-        # Call on_spawn for all mechanics
-        entity.on_spawn()
-        return entity
     
     def _cleanup_dead_entities(self) -> None:
         """Remove dead entities from the game and handle death spawns"""
