@@ -21,6 +21,7 @@ king_tower_stats = {
         'range': 7000,
         'collisionRadius': 1.0,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
+        'deployTime': 0.0,
         'projectileData': {
             'speed': 600,
             'damage': 109,
