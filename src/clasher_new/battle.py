@@ -1,4 +1,4 @@
-from .entities import Building, Entity
+from .entities import Building, Entity, Troop
 from .arena import TileGrid
 from .player import PlayerState
 
@@ -27,16 +27,18 @@ class BattleState:
         self.entities[len(self.entities)+1] = entity
         entity.on_spawn()
 
-    def tick(self, dt):
+    def step(self, dt):
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
-        for entity in self.entities:
+        for entity in self.entities.values():
             entity.update(dt, self)
+        self.time += dt
+        self.tick += 1
 
     def deploy_card(self, player_id, card_name, position):
         if not self.players[player_id].can_play_card(card_name):
             return False
-        self._spawn_entity(Entity(len(self.entities)+1, position, player_id, card_name, []))
+        self._spawn_entity(Troop(len(self.entities)+1, position, player_id, card_name, []))
         return True
 
 

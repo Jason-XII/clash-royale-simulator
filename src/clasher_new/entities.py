@@ -1,8 +1,7 @@
 import random
 
-from card_utils import Card
+from .card_utils import Card
 import math
-from .battle import BattleState
 from .arena import Position, TileGrid
 
 
@@ -121,15 +120,13 @@ class Entity:
 
     def get_nearest_target(self, entities):
         """Find nearest valid target with priority rules"""
-        nearest = None
-        min_distance = float('inf')
         building_targets = []
         troop_targets = []
-        
         for entity in entities.values():
             if not self._is_valid_target(entity): continue # exclude spells or stealth entities
+            print('Examining entity', entity.data.name)
             distance = self.position.distance_to(entity.position)
-            if (entity.is_air_unit and not self.data.attack_air) or ((not entity.is_air_unit) and not self.data.attack_ground):
+            if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
             if distance <= self.data.sight_range:
                 if isinstance(entity, Building):
@@ -141,7 +138,10 @@ class Entity:
             targets = building_targets
         else:
             targets = troop_targets if troop_targets else building_targets
-        return sorted(targets)[0][1] # returns nearest entity
+
+        targets.sort()
+        if not targets: return None
+        else: return targets[0][1]
     
     def _should_switch_target(self, current_target: 'Entity', new_target: 'Entity') -> bool:
         """Determine if we should switch from current target to new target"""
@@ -260,8 +260,10 @@ class Troop(Entity):
 
     def update(self, dt: float, battle_state: 'BattleState') -> None:
         """Update troop - move and attack"""
+
         if not self.is_alive: return
-        if self.stun_timer > 0: return
+        if self.stun_timer > 0:
+            self.stun_timer = max(0.0, self.stun_timer-dt)
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return # Haven't finished deploying yet
@@ -274,6 +276,7 @@ class Troop(Entity):
             self.attack_cooldown -= dt / (self.attack_speed_buff * self.attack_speed_debuff)
         if self.data.charge_range: self._update_charging_state()
 
+
         current_target = None
         if self.target_id is not None:
             current_target = battle_state.entities.get(self.target_id)
@@ -281,6 +284,7 @@ class Troop(Entity):
         
         # Always check for better targets (troops in FOV take priority over buildings)
         best_target = self.get_nearest_target(battle_state.entities)
+        print(best_target)
         if best_target and (not current_target or self._should_switch_target(current_target, best_target)):
             current_target = best_target
             self.target_id = current_target.id
@@ -309,6 +313,7 @@ class Troop(Entity):
                     self.is_charging = False
                     self.charge_target_position = None
                     self.speed /= 2
+
 
     def _get_pathfind_target(self, target_entity: 'Entity', battle_state=None) -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -417,7 +422,7 @@ class Projectile(Entity):
         for entity in list(battle_state.entities.values()):
             if entity.player == self.player or not entity.is_alive: continue
             if entity.data.is_air_unit and not self.proj.hits_air: continue
-            if (not self.proj.is_air) and not self.proj.hits_ground: continue
+            if (not entity.data.is_air_unit) and not self.proj.hits_ground: continue
             
             # Use hitbox-based collision detection for more accurate splash damage
             if self._hitbox_overlaps_with_splash(entity):

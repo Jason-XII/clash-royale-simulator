@@ -16,10 +16,11 @@ king_tower_stats = {
     'name': 'KingTower',
     'summonCharacterData': {
         'hitpoints': 4824,
+        'hitSpeed': 800,
         'damage': 109,
         'sightRange': 7000,
         'range': 7000,
-        'collisionRadius': 1.0,
+        'collisionRadius': 1000,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
         'deployTime': 0.0,
         'projectileData': {
@@ -29,6 +30,7 @@ king_tower_stats = {
     }
 }
 card_data['KingTower'] = king_tower_stats
+card_data['King_PrincessTowers']['summonCharacterData'] = card_data['King_PrincessTowers']['statCharacterData']
 
 class Card:
     def __init__(self, card_name):
@@ -40,19 +42,19 @@ class Card:
 
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius')
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
-        self.collision_radius = self.data['summonCharacterData'].get('collisionRadius')
+        self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1000)
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed')
         self.speed = self.data['summonCharacterData'].get('speed')
         self.target_only_buildings = self.data['summonCharacterData']['tidTarget'] == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units
-        self.attack_air = 'AIR' in self.data['summonCharacterData']['tidTarget']
+        self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
         self.attack_ground = ('GROUND' in self.data['summonCharacterData']['tidTarget']) or self.target_only_buildings
         self.range = self.data['summonCharacterData']['range']
         self.sight_range = self.data['summonCharacterData']['sightRange']
-        self.deploy_time = self.data['summonCharacterData']['deployTime']
+        self.deploy_time = self.data['summonCharacterData'].get('deployTime', 0) / 1000
         self.charge_range = self.data['summonCharacterData'].get('chargeRange')
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
-        self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData'))
+        self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData', {}))
         self.area_effect_data = AreaEffectData(self.data.get('areaEffectObjectData', {}))
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
 
@@ -66,8 +68,8 @@ class Projectile:
         self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0)
         self.target_buff = self.data.get('targetBuffData', {})
         self.buff_time = self.data.get('buffTime')
-        self.hits_air = 'AIR' in self.data.get('tidTarget')
-        self.hits_ground = 'GROUND' in self.data.get('tidTarget') or 'BUILDING' in self.data.get('tidTarget')
+        self.hits_air = 'AIR' in self.data.get('tidTarget', '')
+        self.hits_ground = 'GROUND' in self.data.get('tidTarget', '') or 'BUILDING' in self.data.get('tidTarget', '')
         self.pushback = self.data.get('pushback', 0)
 
 class AreaEffectData:

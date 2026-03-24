@@ -1,4 +1,4 @@
-from card_utils import Card
+from .card_utils import Card
 
 # Hardcoded: max elixir is 10
 
