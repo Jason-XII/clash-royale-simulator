@@ -361,7 +361,7 @@ class Building(Entity):
         for mechanic in self.mechanics:
             mechanic.on_tick(self, dt * 1000)
         if self.data.lifetime > 0:
-            decay = (self.data.hp / float(self.data.lifetime)) * (dt * 1000.0)
+            decay = (self.data.hp / float(self.data.lifetime)) * dt
             self.take_damage(decay)
         if self.attack_cooldown > 0: self.attack_cooldown -= dt * (self.attack_speed_debuff * self.attack_speed_buff)
         target = self.get_nearest_target(battle_state.entities)

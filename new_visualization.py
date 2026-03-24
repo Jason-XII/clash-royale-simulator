@@ -21,7 +21,7 @@ class Visualizer:
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 18)
-        self.battle = BattleState(PlayerState(0, player_0_deck, 10), PlayerState(0, player_1_deck, 10))
+        self.battle = BattleState(PlayerState(0, player_0_deck, 10), PlayerState(1, player_1_deck, 10))
         self.paused = False
         self.speed = 1
         self.scheduled = []
@@ -42,6 +42,7 @@ class Visualizer:
         for y in range(33): pygame.draw.line(self.screen, (0,150,0), (AX,AY+y*TILE), (AX+AW,AY+y*TILE), 1)
 
     def draw_entities(self):
+        print([(e.id, e.data.name, e.position.x, e.position.y, e.is_alive) for e in self.battle.entities.values()])
         for e in self.battle.entities.values():
             if not e.is_alive: continue
             sx, sy = w2s(e.position.x, e.position.y)
