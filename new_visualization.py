@@ -47,7 +47,7 @@ class Visualizer:
             if not e.is_alive: continue
             sx, sy = w2s(e.position.x, e.position.y)
             color = BLUE if e.player == 0 else RED
-            r = int((e.data.collision_radius or 500) / 1000 * TILE)
+            r = int(e.data.collision_radius * TILE)
             pygame.draw.circle(self.screen, color, (sx,sy), max(r,4))
             pygame.draw.circle(self.screen, BLACK, (sx,sy), max(r,4), 1)
             # Name

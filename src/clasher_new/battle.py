@@ -41,4 +41,17 @@ class BattleState:
         self._spawn_entity(Troop(len(self.entities)+1, position, player_id, card_name, []))
         return True
 
+    def ground_walkable(self, position, mover_radius):
+        if not self.arena.is_walkable(position): return False
+        return not self.is_position_occupied_by_building(position, mover_radius)
+
+    def is_position_occupied_by_building(self, position, mover_radius: float = 0.5) -> bool:
+        """Return True when a position overlaps any live building footprint."""
+        for entity in self.entities.values():
+            if not isinstance(entity, Building) or not entity.is_alive:
+                continue
+            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius) * 0.95:
+                return True
+        return False
+
 

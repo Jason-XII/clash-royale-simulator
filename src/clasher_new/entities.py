@@ -187,7 +187,7 @@ class Troop(Entity):
         new_position = Position(self.position.x + move_x, self.position.y + move_y)
 
         # Air units ignore walkability checks, ground units must check
-        if self.data.is_air_unit or (battle_state.is_ground_position_walkable(new_position, self)):
+        if self.data.is_air_unit or (battle_state.ground_walkable(new_position, self.data.collision_radius)):
             self.position.x += move_x
             self.position.y += move_y
         else:
@@ -210,7 +210,7 @@ class Troop(Entity):
             new_move_y = math.sin(new_angle) * move_distance
             alt_position = Position(self.position.x + new_move_x, self.position.y + new_move_y)
 
-            if battle_state.is_ground_position_walkable(alt_position, self):
+            if battle_state.ground_walkable(alt_position, self.data.collision_radius):
                 return new_move_x, new_move_y
         return None
 
@@ -314,6 +314,8 @@ class Troop(Entity):
                     self.is_charging = False
                     self.charge_target_position = None
                     self.speed /= 2
+        else:
+            self.move_towards(self._get_basic_pathfind_target(), dt, self.battle_state)
 
 
     def _get_pathfind_target(self, target_entity: 'Entity', battle_state=None) -> Position:
