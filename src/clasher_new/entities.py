@@ -176,12 +176,9 @@ class Troop(Entity):
             self.is_charging = True
             self.speed *= 2
 
-    def _move_towards_target(self, target_entity: 'Entity', dt: float, battle_state=None) -> None:
-        """Move towards target entity with simple obstacle avoidance"""
-        # Air units fly directly to targets
-        if self.data.is_air_unit: pathfind_target = target_entity.position
-        else: pathfind_target = self._get_pathfind_target(target_entity, battle_state)
-        dx, dy = pathfind_target.x-self.position.x, pathfind_target.y-self.position.y
+
+    def move_towards(self, position, dt: float, battle_state=None) -> None:
+        dx, dy = position.x-self.position.x, position.y-self.position.y
         distance = math.hypot(dx, dy)
         move_distance = max((self.speed / 60.0) * dt, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
@@ -293,7 +290,11 @@ class Troop(Entity):
             # Move towards target if out of range
             distance = self.position.distance_to(current_target.position)
             if distance > (self.data.range + current_target.data.collision_radius):
-                self._move_towards_target(current_target, dt, battle_state)
+                if self.data.is_air_unit:
+                    pathfind_target = current_target.position
+                else:
+                    pathfind_target = self._get_pathfind_target(current_target, battle_state)
+                self.move_towards(pathfind_target, dt, battle_state)
             elif self.attack_cooldown <= 0:
                 for mechanic in self.mechanics:
                     mechanic.on_attack_start(self, current_target)

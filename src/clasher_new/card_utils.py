@@ -50,7 +50,7 @@ class Card:
         self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
         self.attack_ground = ('GROUND' in self.data['summonCharacterData']['tidTarget']) or self.target_only_buildings
         self.range = self.data['summonCharacterData']['range']
-        self.sight_range = self.data['summonCharacterData']['sightRange']
+        self.sight_range = self.data['summonCharacterData']['sightRange'] / 1000
         self.deploy_time = self.data['summonCharacterData'].get('deployTime', 0) / 1000
         self.charge_range = self.data['summonCharacterData'].get('chargeRange')
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
