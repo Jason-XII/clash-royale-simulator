@@ -26,6 +26,7 @@ class Entity:
     def update(self, dt: float, battle_state): raise NotImplementedError
     def take_damage(self, amount: float):
         """Apply damage to entity"""
+        print(self.card_name, amount)
         for mechanic in self.mechanics:
             guard = getattr(mechanic, "take_damage_during_dash", None)
             if callable(guard):
@@ -124,7 +125,6 @@ class Entity:
         troop_targets = []
         for entity in entities.values():
             if not self._is_valid_target(entity): continue # exclude spells or stealth entities
-            print('Examining entity', entity.data.name)
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
@@ -180,7 +180,7 @@ class Troop(Entity):
     def move_towards(self, position, dt: float, battle_state=None) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
         distance = math.hypot(dx, dy)
-        move_distance = max((self.speed / 60.0) * dt, distance)
+        move_distance = min(self.speed * dt, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
 
         # Check if the new position would be walkable (for ground units)
@@ -281,7 +281,6 @@ class Troop(Entity):
         
         # Always check for better targets (troops in FOV take priority over buildings)
         best_target = self.get_nearest_target(battle_state.entities)
-        print(best_target)
         if best_target and (not current_target or self._should_switch_target(current_target, best_target)):
             current_target = best_target
             self.target_id = current_target.id
@@ -336,14 +335,17 @@ class Troop(Entity):
         near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
         on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
                     abs(self.position.y - 16.0) <= 1.0)
-        if on_bridge:
+        before_bridge = (self.position.y < 16.0 and self.player==0) or (self.position.y > 16.0 and self.player==1)
+        if before_bridge and not on_bridge:
+            possible_x = [3, 14]
+            possible_y = [15, 17]
+            return Position(min(possible_x, key=lambda x: abs(self.position.x - x)),
+                            min(possible_y, key=lambda y: abs(self.position.y - y)))
+        else:
             if self.player == 0:
                 return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
             else:
                 return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
-        else:
-            possible_x = [2, 3, 4, 13, 14, 15]
-            return Position(max(possible_x, key=lambda x: abs(self.position.x - x)), 16.0)
   
 
 class Building(Entity):
@@ -365,7 +367,7 @@ class Building(Entity):
             mechanic.on_tick(self, dt * 1000)
         if self.data.lifetime > 0:
             decay = (self.data.hp / float(self.data.lifetime)) * dt
-            self.take_damage(decay)
+            if decay > 0: self.take_damage(decay)
         if self.attack_cooldown > 0: self.attack_cooldown -= dt * (self.attack_speed_debuff * self.attack_speed_buff)
         target = self.get_nearest_target(battle_state.entities)
         self.target_id = target.id if target else None
@@ -395,6 +397,7 @@ class Projectile(Entity):
     def __init__(self, id, position, player, source_card_name, target_position):
         # No mechanics field for projectile
         super().__init__(id, position, player, source_card_name, [])
+        print('Projectile created')
         self.target_position = target_position
         self.proj = self.data.projectile_data # a shortcut
     
@@ -415,10 +418,6 @@ class Projectile(Entity):
         step = direction / abs(direction) * self.proj.speed * dt
         self.position.x += step.real
         self.position.y += step.imag
-
-    def _hitbox_overlaps_with_splash(self, entity: 'Entity') -> bool:
-        """Check if entity's hitbox overlaps with splash damage radius"""
-        return entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius)
     
     def _deal_splash_damage(self, battle_state: 'BattleState') -> None:
         """Deal damage to entities in splash radius using hitbox overlap detection"""
@@ -428,7 +427,7 @@ class Projectile(Entity):
             if (not entity.data.is_air_unit) and not self.proj.hits_ground: continue
             
             # Use hitbox-based collision detection for more accurate splash damage
-            if self._hitbox_overlaps_with_splash(entity):
+            if entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius):
                 entity.take_damage(self.proj.damage)
                 if slow:=self.proj.target_buff.get('speedMultiplier'):
                     entity.apply_slow(self.proj.buff_time, slow)
