@@ -53,10 +53,10 @@ class Visualizer:
             lbl = self.font.render(e.data.name, True, BLACK)
             self.screen.blit(lbl, lbl.get_rect(center=(sx, sy+r+10)))
             # HP bar
-            if e.data.hp > 0:
+            if e.hp > 0:
                 bw = max(r*2, 16)
                 pygame.draw.rect(self.screen, BLACK, (sx-bw//2-1, sy-r-12, bw+2, 5))
-                pygame.draw.rect(self.screen, GREEN, (sx-bw//2, sy-r-11, bw, 3))
+                pygame.draw.rect(self.screen, GREEN, (sx-bw//2, sy-r-11, (e.hp/e.data.hp)*bw, 3))
 
     def draw_ui(self):
         txt = self.font.render(f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x", True, BLACK)

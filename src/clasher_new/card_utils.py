@@ -43,7 +43,7 @@ class Card:
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius')
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1) / 1000
-        self.hit_speed = self.data['summonCharacterData'].get('hitSpeed')
+        self.hit_speed = self.data['summonCharacterData'].get('hitSpeed') / 1000
         self.speed = self.data['summonCharacterData'].get('speed', 0)/60
         self.target_only_buildings = self.data['summonCharacterData']['tidTarget'] == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units
@@ -71,6 +71,10 @@ class Projectile:
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')
         self.hits_ground = 'GROUND' in self.data.get('tidTarget', '') or 'BUILDING' in self.data.get('tidTarget', '')
         self.pushback = self.data.get('pushback', 0)
+
+        if self.data.get('name') == 'TowerPrincessProjectile':
+            self.hits_air = True
+            self.hits_ground = True
 
 class AreaEffectData:
     def __init__(self, area_effect_data):

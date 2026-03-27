@@ -12,13 +12,14 @@ class Entity:
         self.attack_cooldown = 0
         self.speed = self.data.speed
         self.battle_state = None
+        self.hp = self.data.hp
 
     def update(self, dt): raise NotImplementedError
 
     def take_damage(self, amount: float):
         """Apply damage to entity"""
-        self.data.hp -= amount
-        if self.data.hp <= 0 and self.is_alive:
+        self.hp -= amount
+        if self.hp <= 0 and self.is_alive:
             self.is_alive = False
 
     def get_nearest_target(self):
@@ -61,7 +62,7 @@ class Entity:
 
 class Troop(Entity):
     def __init__(self, id, position, player, card_name):
-        super().__init__(position, player, card_name)
+        super().__init__(id, position, player, card_name)
         self.deploy_delay_remaining = self.data.deploy_time
         self.target_id = None
 
@@ -94,6 +95,36 @@ class Troop(Entity):
             self.position.x += new_move_x
             self.position.y += new_move_y
 
+    def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
+        """Get pathfinding target using priority system with advanced post-tower-destruction logic:
+        Air units: 1) Targets in FOV, 2) Towers (fly directly over river)
+        Ground units:
+        - Before first tower destroyed: 1) Troops in sight range, 2) Bridge center, 3) Princess towers
+        - After first tower destroyed: 1) Troops in FOV, 2) Center bridge, 3) Cross bridge if clear, 4) Target buildings
+        """
+        final_target = target_entity.position
+        need_to_cross = (self.position.y - 16.0) * (final_target.y - 16.0) < 0
+        if self.data.is_air_unit or not need_to_cross:
+            return final_target
+        return self._get_basic_pathfind_target()
+
+    def _get_basic_pathfind_target(self) -> Position:
+        """Original pathfinding logic before first tower is destroyed"""
+        near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
+        on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
+                    abs(self.position.y - 16.0) <= 1.0)
+        before_bridge = (self.position.y < 16.0 and self.player==0) or (self.position.y > 16.0 and self.player==1)
+        if before_bridge and not on_bridge:
+            possible_x = [3, 14]
+            possible_y = [15, 17]
+            return Position(min(possible_x, key=lambda x: abs(self.position.x - x)),
+                            min(possible_y, key=lambda y: abs(self.position.y - y)))
+        else:
+            if self.player == 0:
+                return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
+            else:
+                return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
+
     def update(self, dt):
         if not self.is_alive: return
         if self.deploy_delay_remaining > 0:
@@ -101,15 +132,132 @@ class Troop(Entity):
             return # Haven't finished deploying yet
         if self.attack_cooldown > 0:
             self.attack_cooldown -= dt
+
+        # Logic: the troop may have a current target (or doesn't), and `get_nearest_target` also gives a
+        # recommended target. If current target exists, compare that with the recommendation to see
+        # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
+        # be none.
+        current_target = None
         if self.target_id is None or \
             self.target_id not in self.battle_state.entities or \
                 not self.battle_state.entities.get(self.target_id).is_alive:
+            # doesn't have a valid prior target
             self.target_id = None
+        else:
+            current_target = self.battle_state.entities.get(self.target_id)
         best_target = self.get_nearest_target()
-        if (best_target and not self.target_id) or \
-                self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
+        if self.target_id:
+            if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
+                current_target = best_target
+                self.target_id = current_target.id
+        else:
             current_target = best_target
-            self.target_id = current_target.id
+            self.target_id = current_target.id if current_target else None
+
+        if current_target:
+            # Move towards target if out of attack range
+            distance = self.position.distance_to(current_target.position)
+            if distance > (self.data.range + current_target.data.collision_radius):
+                if self.data.is_air_unit:
+                    pathfind_target = current_target.position
+                else:
+                    pathfind_target = self._get_pathfind_target(current_target)
+                self.move_towards(pathfind_target, dt)
+            else:
+                if self.attack_cooldown <= 0:
+                    current_target.take_damage(self.data.damage)
+                    print(f'Did {self.data.damage} damage.')
+                    self.attack_cooldown = 1 / self.data.hit_speed
+        else:
+            self.move_towards(self._get_basic_pathfind_target(), dt, self.battle_state)
+
+
+class Building(Entity):
+    def __init__(self, id, position, player, card_name, persistent=False):
+        super().__init__(id, position, player, card_name)
+        self.deploy_delay_remaining = self.data.deploy_time
+        self.lifetime_elapsed = 0.0
+        self.target_id = None
+        self.tower_active = False
+        self.persistent = persistent
+
+    def take_damage(self, amount: float):
+        super().take_damage(amount)
+        print(f'{self.data.name} took damage, left hp:', self.hp)
+        if self.data.name == 'KingTower':
+            self.deploy_delay_remaining = 3.0 # I don't know the exact time?
+            self.tower_active = True
+
+    def update(self, dt: float):
+        """Update building - only attack, no movement"""
+        if not self.is_alive: return
+        if self.data.name == 'KingTower' and not self.tower_active: return
+        if self.deploy_delay_remaining > 0:
+            self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
+            return
+        if self.data.lifetime > 0 and not self.persistent:
+            decay = (self.data.hp / float(self.data.lifetime)) * dt
+            self.take_damage(decay)
+        if self.attack_cooldown > 0: self.attack_cooldown -= dt
+        target = self.get_nearest_target()
+        self.target_id = target.id if target else None
+        if target and self.attack_cooldown <= 0:
+            if self.data.projectiles:
+                print('Created projectile')
+                self._create_projectile(target)
+            else:
+                target.take_damage(self.data.damage)
+            self.attack_cooldown = 1 / self.data.hit_speed
+
+    def _create_projectile(self, target: 'Entity') -> None:
+        """Create a projectile towards the target"""
+        projectile = Projectile(
+            id=self.battle_state.next_entity_id, position=Position(self.position.x, self.position.y),
+            player=self.player, source_card_name=self.data.name, target=target,
+        )
+        projectile.battle_state = self.battle_state
+        self.battle_state.entities[projectile.id] = projectile
+        self.battle_state.next_entity_id += 1
+
+class Projectile(Entity):
+    def __init__(self, id, position, player, source_card_name, target, homing=True):
+        super().__init__(id, position, player, source_card_name)
+        self.target_position = Position(target.position.x, target.position.y)
+        self.proj = self.data.projectile_data # a shortcut
+        self.homing = homing
+        self.target = target
+        self.battle_state = None
+
+    def update(self, dt):
+        """Update projectile - move towards target"""
+        if not self.is_alive: return
+        target_position_final = self.target_position if not self.homing else self.target.position
+        distance = self.position.distance_to(target_position_final)
+        if distance <= self.proj.speed * dt:
+            self._deal_splash_damage()
+            self.is_alive = False
+        else:
+            self._move_towards(target_position_final, dt)
+
+    def _deal_splash_damage(self) -> None:
+        """Deal damage to entities in splash radius using hitbox overlap detection"""
+        for entity in list(self.battle_state.entities.values()):
+            if entity.player == self.player or not entity.is_alive: continue
+            if entity.data.is_air_unit and not self.proj.hits_air: continue
+            if (not entity.data.is_air_unit) and not self.proj.hits_ground: continue
+
+            # Use hitbox-based collision detection for more accurate splash damage
+            if entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius):
+                entity.take_damage(self.proj.damage)
+
+    def _move_towards(self, target_pos, dt):
+        """Move towards target position"""
+        # Note: I used a much cleaner way of writing the code.
+        direction = complex(target_pos.x - self.position.x, target_pos.y - self.position.y)
+        step = direction / abs(direction) * self.proj.speed * dt
+        self.position.x += step.real
+        self.position.y += step.imag
+
 
 class BattleState:
     def __init__(self, player_0: PlayerState, player_1: PlayerState):
@@ -124,31 +272,30 @@ class BattleState:
         self.next_entity_id = 1
         self.regen = 2.8
 
-        self._spawn_entity(Building(1, self.arena.RED_LEFT_TOWER, 1, 'King_PrincessTowers', []))
-        self._spawn_entity(Building(2, self.arena.RED_RIGHT_TOWER, 1, 'King_PrincessTowers', []))
-        self._spawn_entity(Building(3, self.arena.BLUE_LEFT_TOWER, 0, 'King_PrincessTowers', []))
-        self._spawn_entity(Building(4, self.arena.BLUE_RIGHT_TOWER, 0, 'King_PrincessTowers', []))
-        self._spawn_entity(Building(5, self.arena.RED_KING_TOWER, 1, 'KingTower', []))
-        self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', []))
+        self._spawn_entity(Building(1, self.arena.RED_LEFT_TOWER, 1, 'King_PrincessTowers', True))
+        self._spawn_entity(Building(2, self.arena.RED_RIGHT_TOWER, 1, 'King_PrincessTowers', True))
+        self._spawn_entity(Building(3, self.arena.BLUE_LEFT_TOWER, 0, 'King_PrincessTowers', True))
+        self._spawn_entity(Building(4, self.arena.BLUE_RIGHT_TOWER, 0, 'King_PrincessTowers', True))
+        self._spawn_entity(Building(5, self.arena.RED_KING_TOWER, 1, 'KingTower', True))
+        self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', True))
 
     def _spawn_entity(self, entity):
         entity.battle_state = self
         self.entities[len(self.entities)+1] = entity
-        entity.on_spawn()
         self.next_entity_id += 1
 
     def step(self, dt):
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):
-            entity.update(dt, self)
+            entity.update(dt)
         self.time += dt
         self.tick += 1
 
     def deploy_card(self, player_id, card_name, position):
         if not self.players[player_id].can_play_card(card_name):
             return False
-        self._spawn_entity(Troop(len(self.entities)+1, position, player_id, card_name, []))
+        self._spawn_entity(Troop(len(self.entities)+1, position, player_id, card_name))
         return True
 
     def ground_walkable(self, position, mover_radius):
