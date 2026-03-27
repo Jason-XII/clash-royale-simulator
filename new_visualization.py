@@ -13,8 +13,7 @@ BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,
 def w2s(x, y): return int(AX+x*TILE), int(AY+y*TILE)
 
 
-player_0_deck = ['Knight', 'MiniPekka']*4
-player_1_deck = ['Knight']*8
+
 
 class Visualizer:
     def __init__(self):
@@ -91,7 +90,9 @@ class Visualizer:
             self.clock.tick(60)
         pygame.quit()
 
+player_0_deck = ['Giant']*8
+player_1_deck = ['MiniPekka']*8
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('MiniPekka', (9, 10))
+    v.deploy('MiniPekka', (9, 32), player=1)
     v.run()

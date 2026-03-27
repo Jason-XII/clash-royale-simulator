@@ -9,7 +9,7 @@ class Entity:
         store_attr()
         self.data = Card(self.card_name)
         self.is_alive = True
-        self.attack_cooldown = self.data.hit_speed
+        self.attack_cooldown = self.data.load_time
         self.speed = self.data.speed
         self.battle_state = None
         self.hp = self.data.hp
@@ -66,8 +66,9 @@ class Troop(Entity):
         self.deploy_delay_remaining = self.data.deploy_time
         self.target_id = None
 
-    def move_towards(self, position, dt: float, battle_state=None) -> None:
+    def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
+        print(f"Real: {dx}, {dy}")
         distance = math.hypot(dx, dy)
         move_distance = min(self.speed * dt, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
@@ -77,9 +78,11 @@ class Troop(Entity):
 
         # Air units ignore walkability checks, ground units must check
         if self.data.is_air_unit or (self.battle_state.ground_walkable(new_position, self.data.collision_radius)):
+            print('Path not blocked, moving, current position:', self.position.x, self.position.y)
             self.position.x += move_x
             self.position.y += move_y
         else:
+            print('Path blocked, finding way around')
             # If direct path is blocked, try to find a way around
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -89,7 +92,7 @@ class Troop(Entity):
                 new_angle = original_angle + angle_offset
                 new_move_x = math.cos(new_angle) * move_distance
                 new_move_y = math.sin(new_angle) * move_distance
-                if battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
+                if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
                     break
             self.position.x += new_move_x
@@ -109,11 +112,11 @@ class Troop(Entity):
         return self._get_basic_pathfind_target()
 
     def _get_basic_pathfind_target(self) -> Position:
-        """Original pathfinding logic before first tower is destroyed"""
+        """If no target in sight, where should the troop walk to? """
         near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
         on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
                     abs(self.position.y - 16.0) <= 1.0)
-        before_bridge = (self.position.y < 16.0 and self.player==0) or (self.position.y > 16.0 and self.player==1)
+        before_bridge = (self.position.y < 14.0 and self.player==0) or (self.position.y > 16.0 and self.player==1)
         if before_bridge and not on_bridge:
             possible_x = [3, 14]
             possible_y = [15, 17]
@@ -170,7 +173,55 @@ class Troop(Entity):
                 else:
                     self.attack_cooldown -= dt
         else:
-            self.move_towards(self._get_basic_pathfind_target(), dt, self.battle_state)
+            # now calculate:
+            near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
+            before_bridge = (self.position.y < 14.0 and self.player == 0) or (
+                        self.position.y > 16.0 and self.player == 1)
+
+            if near_left and before_bridge and self.player == 0:
+                if 2.5 <= self.position.x <= 4.5:
+                    dx = 0
+                elif self.position.x < 2.5:
+                    dx = 2.5-self.position.x
+                else:
+                    dx = 4.5-self.position.x
+                dy = 14.0-self.position.y
+            elif not near_left and before_bridge and self.player == 0:
+                if 13.5 <= self.position.x <= 15.5:
+                    dx = 0
+                elif self.position.x < 13.5:
+                    dx = 13.5-self.position.x
+                else:
+                    dx = 15.5-self.position.x
+                dy = 14.0-self.position.y
+            elif self.player == 0:
+                self.move_towards(self._get_basic_pathfind_target(), dt)
+                return
+            elif near_left and before_bridge and self.player == 1:
+                if 2.5 <= self.position.x <= 4.5:
+                    dx = 0
+                elif self.position.x < 2.5:
+                    dx = 2.5-self.position.x
+                else:
+                    dx = 4.5-self.position.x
+                dy = 16.0-self.position.y
+            elif not near_left and before_bridge and self.player == 1:
+                if 13.5 <= self.position.x <= 15.5:
+                    dx = 0
+                elif self.position.x < 13.5:
+                    dx = 13.5 - self.position.x
+                else:
+                    dx = 15.5 - self.position.x
+                dy = 16.0 - self.position.y
+            else:
+                self.move_towards(self._get_basic_pathfind_target(), dt)
+                return
+            print(f"{self.data.name}: {dx}, {dy}")
+            distance = dt * self.data.speed
+            real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
+            real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
+            self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt)
+
 
 
 class Building(Entity):

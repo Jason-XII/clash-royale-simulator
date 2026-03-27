@@ -44,6 +44,7 @@ class Card:
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1) / 1000
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed') / 1000
+        self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
         self.speed = self.data['summonCharacterData'].get('speed', 0)/60
         self.target_only_buildings = self.data['summonCharacterData']['tidTarget'] == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units
