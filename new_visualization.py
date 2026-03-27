@@ -13,7 +13,7 @@ BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,
 def w2s(x, y): return int(AX+x*TILE), int(AY+y*TILE)
 
 
-player_0_deck = ['Knight']*8
+player_0_deck = ['Knight', 'MiniPekka']*4
 player_1_deck = ['Knight']*8
 
 class Visualizer:
@@ -93,5 +93,5 @@ class Visualizer:
 
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('Knight', (9, 10))
+    v.deploy('MiniPekka', (9, 10))
     v.run()

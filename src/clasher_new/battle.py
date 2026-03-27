@@ -9,7 +9,7 @@ class Entity:
         store_attr()
         self.data = Card(self.card_name)
         self.is_alive = True
-        self.attack_cooldown = 0
+        self.attack_cooldown = self.data.hit_speed
         self.speed = self.data.speed
         self.battle_state = None
         self.hp = self.data.hp
@@ -130,8 +130,7 @@ class Troop(Entity):
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return # Haven't finished deploying yet
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= dt
+
 
         # Logic: the troop may have a current target (or doesn't), and `get_nearest_target` also gives a
         # recommended target. If current target exists, compare that with the recommendation to see
@@ -167,7 +166,9 @@ class Troop(Entity):
                 if self.attack_cooldown <= 0:
                     current_target.take_damage(self.data.damage)
                     print(f'Did {self.data.damage} damage.')
-                    self.attack_cooldown = 1 / self.data.hit_speed
+                    self.attack_cooldown = self.data.hit_speed
+                else:
+                    self.attack_cooldown -= dt
         else:
             self.move_towards(self._get_basic_pathfind_target(), dt, self.battle_state)
 
@@ -266,7 +267,7 @@ class BattleState:
         self.arena = TileGrid()
         self.time = 0.0
         self.tick = 0
-        self.dt = 1 / 30  # 33ms per tick (~30 FPS)
+        self.dt = 1 / 60
         self.game_over = False
         self.winner = None
         self.next_entity_id = 1
