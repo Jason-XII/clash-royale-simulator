@@ -169,6 +169,7 @@ class Troop(Entity):
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
                 self.move_towards(pathfind_target, dt)
+                self.attack_cooldown = self.data.load_time
             else:
                 if self.attack_cooldown <= 0:
                     current_target.take_damage(self.data.damage)

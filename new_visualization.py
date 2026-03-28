@@ -90,9 +90,10 @@ class Visualizer:
             self.clock.tick(60)
         pygame.quit()
 
-player_0_deck = ['Giant']*8
+player_0_deck = ['Knight']*8
 player_1_deck = ['MiniPekka']*8
 if __name__ == "__main__":
     v = Visualizer()
     v.deploy('MiniPekka', (9.5, 31.5), player=1)
+    v.deploy('Knight', (9.5, 0.5))
     v.run()
