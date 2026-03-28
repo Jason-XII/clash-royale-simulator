@@ -46,7 +46,6 @@ class Visualizer:
             sx, sy = w2s(e.position.x, e.position.y)
             color = BLUE if e.player == 0 else RED
             r = int(e.data.collision_radius * TILE)
-            print(e.data.name, e.data.collision_radius)
             pygame.draw.circle(self.screen, color, (sx,sy), max(r,4))
             pygame.draw.circle(self.screen, BLACK, (sx,sy), max(r,4), 1)
             # Name
@@ -95,5 +94,5 @@ player_0_deck = ['Giant']*8
 player_1_deck = ['MiniPekka']*8
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('MiniPekka', (9, 26), player=1)
+    v.deploy('MiniPekka', (9.5, 31.5), player=1)
     v.run()

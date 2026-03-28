@@ -20,7 +20,7 @@ king_tower_stats = {
         'damage': 109,
         'sightRange': 7000,
         'range': 7000,
-        'collisionRadius': 1000,
+        'collisionRadius': 1750,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
         'deployTime': 0.0,
         'projectileData': {
@@ -42,7 +42,7 @@ class Card:
 
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
-        self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1) / 1000
+        self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1000) / 1000
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed') / 1000
         self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
         self.speed = self.data['summonCharacterData'].get('speed', 0)/60
@@ -60,6 +60,9 @@ class Card:
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
 
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
+
+        if self.name == 'King_PrincessTowers':
+            self.collision_radius = 1.25
 
 class Projectile:
     def __init__(self, projectile_data):

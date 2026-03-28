@@ -13,10 +13,10 @@ class Position:
 class TileGrid:
     width, height = 18, 32
     tile_size: float = 100.0
-    BLUE_KING_TOWER = Position(9.0, 2.5)     # King tower centered at x=9 (middle of 18-wide arena)
+    BLUE_KING_TOWER = Position(9.0, 3.0)     # King tower centered at x=9 (middle of 18-wide arena)
     BLUE_LEFT_TOWER = Position(3.5, 6.5)     # Left princess tower
     BLUE_RIGHT_TOWER = Position(14.5, 6.5)   # Right princess tower (corrected for better symmetry)
-    RED_KING_TOWER = Position(9.0, 29.5)     # King tower centered at x=9
+    RED_KING_TOWER = Position(9.0, 29.0)     # King tower centered at x=9
     RED_LEFT_TOWER = Position(3.5, 25.5)     # Left princess tower  
     RED_RIGHT_TOWER = Position(14.5, 25.5)   # Right princess tower (corrected for better symmetry)
     LEFT_BRIDGE = Position(3.5, 16.0)   # Left bridge center of center tile (tiles 2,3,4 -> center at 3.5)

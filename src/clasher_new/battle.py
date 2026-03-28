@@ -66,6 +66,7 @@ class Troop(Entity):
         self.deploy_delay_remaining = self.data.deploy_time
         self.target_id = None
         self.name = self.data.name
+        self.path_blocked_counter = 0
 
     def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
@@ -80,21 +81,26 @@ class Troop(Entity):
         if self.data.is_air_unit or (self.battle_state.ground_walkable(new_position, self.data.collision_radius)):
             self.position.x += move_x
             self.position.y += move_y
+            print('normal movement')
+            self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
+            print('blocked, finding alternate path')
             # If direct path is blocked, try to find a way around
+            self.path_blocked_counter += 1
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
             angle_offsets = [i * math.pi / 8 for i in range(1, 9)] + [-i * math.pi / 8 for i in range(1, 9)]
-            new_move_x, new_move_y = None, None
             for angle_offset in angle_offsets:
                 new_angle = original_angle + angle_offset
                 new_move_x = math.cos(new_angle) * move_distance
                 new_move_y = math.sin(new_angle) * move_distance
                 if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
-                    break
-            self.position.x += new_move_x
-            self.position.y += new_move_y
+                    if new_move_x*move_x+new_move_y*move_y > 0:
+                        self.position.x += new_move_x
+                        self.position.y += new_move_y
+                        print(new_move_x, new_move_y, move_x, move_y, self.position.x, self.position.y)
+                        break
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -174,7 +180,6 @@ class Troop(Entity):
             near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
             before_bridge = (self.position.y < 14.0 and self.player == 0) or (
                         self.position.y > 16.0 and self.player == 1)
-
             if near_left and before_bridge and self.player == 0:
                 if 2.5 <= self.position.x <= 4.5:
                     dx = 0
@@ -216,7 +221,12 @@ class Troop(Entity):
             distance = dt * self.data.speed
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
             real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
-            self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt)
+            print(dx, dy, real_dx, real_dy)
+            if not self.path_blocked_counter:
+                self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt)
+            else:
+                self.move_towards(Position(self.position.x, self.position.y + dy), dt)
+
 
 
 
@@ -356,7 +366,7 @@ class BattleState:
         for entity in self.entities.values():
             if not isinstance(entity, Building) or not entity.is_alive:
                 continue
-            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius) * 0.95:
+            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius)*0.95:
                 return True
         return False
 
