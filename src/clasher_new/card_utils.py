@@ -40,7 +40,7 @@ class Card:
         self.name = self.data['name']
         self.damage = self.data['summonCharacterData'].get('damage', 0)
 
-        self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius')
+        self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1) / 1000
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed') / 1000
@@ -65,10 +65,10 @@ class Projectile:
     def __init__(self, projectile_data):
         self.data = projectile_data
         self.damage = self.data.get('damage')
-        self.speed = self.data.get('speed')
+        self.speed = self.data.get('speed', 0) / 1000
         self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0)
         self.target_buff = self.data.get('targetBuffData', {})
-        self.buff_time = self.data.get('buffTime')
+        self.buff_time = self.data.get('buffTime', 0) / 1000
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')
         self.hits_ground = 'GROUND' in self.data.get('tidTarget', '') or 'BUILDING' in self.data.get('tidTarget', '')
         self.pushback = self.data.get('pushback', 0)
@@ -80,7 +80,7 @@ class Projectile:
 class AreaEffectData:
     def __init__(self, area_effect_data):
         self.data = area_effect_data
-        self.duration = self.data.get('lifeDuration')
+        self.duration = self.data.get('lifeDuration', 0) / 1000
         self.buff_data = self.data.get('buffData', {})
         self.speed_multiplier = self.buff_data.get('speedMultiplier')
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
