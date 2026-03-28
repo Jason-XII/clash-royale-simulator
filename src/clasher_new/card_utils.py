@@ -65,14 +65,14 @@ class Projectile:
     def __init__(self, projectile_data):
         self.data = projectile_data
         self.damage = self.data.get('damage')
-        self.speed = self.data.get('speed', 0) / 1000
+        self.speed = self.data.get('speed', 0) / 60
         self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0)
         self.target_buff = self.data.get('targetBuffData', {})
         self.buff_time = self.data.get('buffTime', 0) / 1000
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')
         self.hits_ground = 'GROUND' in self.data.get('tidTarget', '') or 'BUILDING' in self.data.get('tidTarget', '')
         self.pushback = self.data.get('pushback', 0)
-
+        self.name = self.data.get('name', 'Unknown')
         if self.data.get('name') == 'TowerPrincessProjectile':
             self.hits_air = True
             self.hits_ground = True

@@ -65,10 +65,10 @@ class Troop(Entity):
         super().__init__(id, position, player, card_name)
         self.deploy_delay_remaining = self.data.deploy_time
         self.target_id = None
+        self.name = self.data.name
 
     def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
-        print(f"Real: {dx}, {dy}")
         distance = math.hypot(dx, dy)
         move_distance = min(self.speed * dt, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
@@ -78,11 +78,9 @@ class Troop(Entity):
 
         # Air units ignore walkability checks, ground units must check
         if self.data.is_air_unit or (self.battle_state.ground_walkable(new_position, self.data.collision_radius)):
-            print('Path not blocked, moving, current position:', self.position.x, self.position.y)
             self.position.x += move_x
             self.position.y += move_y
         else:
-            print('Path blocked, finding way around')
             # If direct path is blocked, try to find a way around
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -168,7 +166,6 @@ class Troop(Entity):
             else:
                 if self.attack_cooldown <= 0:
                     current_target.take_damage(self.data.damage)
-                    print(f'Did {self.data.damage} damage.')
                     self.attack_cooldown = self.data.hit_speed
                 else:
                     self.attack_cooldown -= dt
@@ -216,7 +213,6 @@ class Troop(Entity):
             else:
                 self.move_towards(self._get_basic_pathfind_target(), dt)
                 return
-            print(f"{self.data.name}: {dx}, {dy}")
             distance = dt * self.data.speed
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
             real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
@@ -232,10 +228,10 @@ class Building(Entity):
         self.target_id = None
         self.tower_active = False
         self.persistent = persistent
+        self.name = self.data.name
 
     def take_damage(self, amount: float):
         super().take_damage(amount)
-        print(f'{self.data.name} took damage, left hp:', self.hp)
         if self.data.name == 'KingTower':
             self.deploy_delay_remaining = 3.0 # I don't know the exact time?
             self.tower_active = True
@@ -255,7 +251,6 @@ class Building(Entity):
         self.target_id = target.id if target else None
         if target and self.attack_cooldown <= 0:
             if self.data.projectiles:
-                print('Created projectile')
                 self._create_projectile(target)
             else:
                 target.take_damage(self.data.damage)
@@ -279,6 +274,8 @@ class Projectile(Entity):
         self.homing = homing
         self.target = target
         self.battle_state = None
+        self.name = self.proj.name
+        self.data.collision_radius = 0.3
 
     def update(self, dt):
         """Update projectile - move towards target"""
@@ -286,7 +283,7 @@ class Projectile(Entity):
         target_position_final = self.target_position if not self.homing else self.target.position
         distance = self.position.distance_to(target_position_final)
         if distance <= self.proj.speed * dt:
-            self._deal_splash_damage()
+            self.target.take_damage(self.proj.damage)
             self.is_alive = False
         else:
             self._move_towards(target_position_final, dt)
