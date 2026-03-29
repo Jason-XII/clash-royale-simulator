@@ -3,6 +3,7 @@ from .player import PlayerState
 from .card_utils import Card
 from fastcore.all import store_attr
 import math
+from itertools import combinations
 
 class Entity:
     def __init__(self, id, position, player, card_name):
@@ -351,6 +352,7 @@ class BattleState:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):
             entity.update(dt)
+        self.resolve_collisions()
         self.time += dt
         self.tick += 1
 
@@ -369,9 +371,26 @@ class BattleState:
         for entity in self.entities.values():
             if not isinstance(entity, Building) or not entity.is_alive:
                 continue
-            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius)*0.95:
+            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius)*0.9:
                 return True
         return False
+
+    def resolve_collisions(self):
+        entities_alive = [each for each in self.entities.values() if each.is_alive and isinstance(each, Troop)]
+        ground_troops = combinations([each for each in entities_alive if not each.data.is_air_unit], 2)
+        flying_troops = combinations([each for each in entities_alive if each.data.is_air_unit], 2)
+        for troop in (ground_troops, flying_troops):
+            for e1, e2 in troop:
+                if e1.position.distance_to(e2.position) < e1.data.collision_radius + e2.data.collision_radius:
+                    overlap = e1.data.collision_radius + e2.data.collision_radius - e1.position.distance_to(e2.position)
+                    # the direction vector points from e1 to e2
+                    direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
+                    direction_vector /= abs(direction_vector)
+                    movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
+                    e2.position.x += direction_vector.real*movement_ratio*overlap
+                    e2.position.y += direction_vector.imag*movement_ratio*overlap
+                    e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap
+                    e1.position.y += -direction_vector.imag * (1-movement_ratio)*overlap
 
     def on_death(self, entity):
         if entity.name == 'King_PrincessTowers':
