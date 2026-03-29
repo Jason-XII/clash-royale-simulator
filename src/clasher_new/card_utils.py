@@ -15,7 +15,7 @@ card_data = {each['name']: each for each in data}
 king_tower_stats = {
     'name': 'KingTower',
     'summonCharacterData': {
-        'hitpoints': 4824,
+        'hitpoints': 2100,
         'hitSpeed': 800,
         'damage': 109,
         'sightRange': 7000,
