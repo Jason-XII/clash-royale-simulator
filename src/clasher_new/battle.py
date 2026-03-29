@@ -21,6 +21,7 @@ class Entity:
         self.hp -= amount
         if self.hp <= 0 and self.is_alive:
             self.is_alive = False
+            self.battle_state.on_death(self)
 
     def get_nearest_target(self):
         """Find nearest valid target with priority rules"""
@@ -32,7 +33,7 @@ class Entity:
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
-            if distance <= self.data.sight_range:
+            if distance-self.data.collision_radius-entity.data.collision_radius <= self.data.sight_range:
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -49,7 +50,7 @@ class Entity:
 
     def _should_switch_target(self, current_target, new_target):
         """Determine if we should switch from current target to new target"""
-        if self.position.distance_to(new_target.position) < self.data.sight_range: return False
+        if self.position.distance_to(new_target.position)-self.data.collision_radius-new_target.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
         if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius:
             return False
@@ -81,10 +82,8 @@ class Troop(Entity):
         if self.data.is_air_unit or (self.battle_state.ground_walkable(new_position, self.data.collision_radius)):
             self.position.x += move_x
             self.position.y += move_y
-            print('normal movement')
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
-            print('blocked, finding alternate path')
             # If direct path is blocked, try to find a way around
             self.path_blocked_counter += 1
             original_angle = math.atan2(move_y, move_x)
@@ -99,7 +98,6 @@ class Troop(Entity):
                     if new_move_x*move_x+new_move_y*move_y > 0:
                         self.position.x += new_move_x
                         self.position.y += new_move_y
-                        print(new_move_x, new_move_y, move_x, move_y, self.position.x, self.position.y)
                         break
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
@@ -128,9 +126,17 @@ class Troop(Entity):
                             min(possible_y, key=lambda y: abs(self.position.y - y)))
         else:
             if self.player == 0:
-                return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
+                if near_left: target = TileGrid.RED_LEFT_TOWER
+                else: target = TileGrid.RED_RIGHT_TOWER
+                if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y >= 25.0:
+                    target = TileGrid.RED_KING_TOWER
+                return target
             else:
-                return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
+                if near_left: target = TileGrid.BLUE_LEFT_TOWER
+                else: target = TileGrid.BLUE_RIGHT_TOWER
+                if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y <= 7.0:
+                    target = TileGrid.BLUE_KING_TOWER
+                return target
 
     def update(self, dt):
         if not self.is_alive: return
@@ -222,13 +228,10 @@ class Troop(Entity):
             distance = dt * self.data.speed
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
             real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
-            print(dx, dy, real_dx, real_dy)
             if not self.path_blocked_counter:
                 self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt)
             else:
                 self.move_towards(Position(self.position.x, self.position.y + dy), dt)
-
-
 
 
 class Building(Entity):
@@ -243,8 +246,7 @@ class Building(Entity):
 
     def take_damage(self, amount: float):
         super().take_damage(amount)
-        if self.data.name == 'KingTower':
-            self.deploy_delay_remaining = 3.0 # I don't know the exact time?
+        if self.data.name == 'KingTower' and not self.tower_active:
             self.tower_active = True
 
     def update(self, dt: float):
@@ -370,5 +372,13 @@ class BattleState:
             if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius)*0.95:
                 return True
         return False
+
+    def on_death(self, entity):
+        if entity.name == 'King_PrincessTowers':
+            player = entity.player
+            for each in self.entities.values():
+                if each.name == 'KingTower' and each.player == player:
+                    each.tower_active = True
+                    break
 
 

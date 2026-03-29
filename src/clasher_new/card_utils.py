@@ -16,14 +16,16 @@ king_tower_stats = {
     'name': 'KingTower',
     'summonCharacterData': {
         'hitpoints': 2100,
-        'hitSpeed': 800,
+        'hitSpeed': 1000,
         'damage': 109,
         'sightRange': 7000,
         'range': 7000,
         'collisionRadius': 1750,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
-        'deployTime': 0.0,
+        'deployTime': 3300,
+        'loadTime': 700,
         'projectileData': {
+            'name': 'KingTowerCannonBall',
             'speed': 600,
             'damage': 109,
         }
