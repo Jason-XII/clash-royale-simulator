@@ -98,28 +98,17 @@ class Troop(Entity):
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
-            angle_offsets = [i * math.pi / 16 for i in range(1, 8)] + [-i * math.pi / 16 for i in range(1, 8)]
-            found_solution = False
+            angle_offsets = [i * math.pi / 16 for i in range(1, 16)] + [-i * math.pi / 16 for i in range(1, 16)]
             for angle_offset in angle_offsets:
                 new_angle = original_angle + angle_offset
                 new_move_x = math.cos(new_angle) * move_distance
                 new_move_y = math.sin(new_angle) * move_distance
-
                 if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
-
                     if new_move_x*move_x+new_move_y*move_y > 0:
-                        print(move_x, move_y, new_move_x, new_move_y)
                         self.position.x += new_move_x
                         self.position.y += new_move_y
-                        found_solution = True
                         break
-                    else:
-                        print('changes angle too much')
-                else:
-                    print('path collide with building', self.position.x+new_move_x, self.position.y+new_move_y)
-            if not found_solution:
-                print('Cannot find correct way to move, original dx, dy is:', move_x, move_y)
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -373,10 +362,11 @@ class BattleState:
     def deploy_card(self, player_id, card_name, position):
         if not self.players[player_id].can_play_card(card_name):
             return False
-        positions = []
         if Card(card_name).spawn_number == 1: positions = [Position(position.x, position.y)]
-        if Card(card_name).spawn_number == 2: positions = [Position(position.x-0.5, position.y),
-                                                           Position(position.x+0.5, position.y)]
+        elif Card(card_name).spawn_number == 2: positions = [Position(position.x-0.55, position.y),
+                                                           Position(position.x+0.55, position.y)]
+        else:
+            positions = [Position(position.x, position.y)]
         for p in positions:
             self._spawn_entity(Troop(len(self.entities)+1, p, player_id, card_name))
         return True

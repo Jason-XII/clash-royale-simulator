@@ -94,6 +94,6 @@ player_0_deck = ['Archer']*8
 player_1_deck = ['MiniPekka', 'Knight']*4
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('MiniPekka', (17.5, 30.5), player=1)
-    v.deploy('Archer', (8.5, 0.5))
+    v.deploy('Pekka', (17.5, 30.5), player=1)
+    v.deploy('Archer', (9.5, 0.5))
     v.run()
