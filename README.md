@@ -2,7 +2,7 @@ This project is still under active development.
 
 # Clash Royale Simulator 
 
-![demo](./demo.mp4)
+![demo](./demo.gif)
 
 ## Why I created this repository
 I like clash royale and want to train a RL agent to play the game. 
