@@ -30,6 +30,18 @@ What's NOT done:
 - evo, hero and elite card mechanics
 - ...
 
+## Where is the code?
+
+The folder structure of this repo is very complicated. I'm sorry for the inconvenience!
+
+The real code files are in `src/clasher_new`. 
+- `__init__.py` is an empty placeholder
+- `gamedata.json` contains very necessary data extracted from the game, like hitpoints, damage, etc.
+- `card_utils.py` reads `gamedata.json` and provides easy ways to access character attributes
+- `arena.py` defines `TileGrid` which contains information on where each sides' King tower and princess towers are located
+- `player.py` is a short file that stores a player's information in game, like current elixir.
+- `battle.py` contains all the game logic, defining behavior for troops, buildings, projectiles and other mechanics.
+
 ## I need help
 
 This project is far from finishing. I already poured more than 25 hours into this project and many more 
