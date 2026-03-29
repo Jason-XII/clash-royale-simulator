@@ -62,6 +62,15 @@ class Entity:
             return True
         return False
 
+    def create_projectile(self, target):
+        if not self.data.projectiles: raise Exception('Entity does not have any projectiles.')
+        projectile = Projectile(
+            id=self.battle_state.next_entity_id, position=Position(self.position.x, self.position.y),
+            player=self.player, source_card_name=self.data.name, target=target)
+        projectile.battle_state = self.battle_state
+        self.battle_state.entities[projectile.id] = projectile
+        self.battle_state.next_entity_id += 1
+
 class Troop(Entity):
     def __init__(self, id, position, player, card_name):
         super().__init__(id, position, player, card_name)
@@ -170,7 +179,7 @@ class Troop(Entity):
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius):
+            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius):
                 if self.data.is_air_unit:
                     pathfind_target = current_target.position
                 else:
@@ -179,7 +188,11 @@ class Troop(Entity):
                 self.attack_cooldown = self.data.load_time
             else:
                 if self.attack_cooldown <= 0:
-                    current_target.take_damage(self.data.damage)
+                    if self.data.damage:
+                        current_target.take_damage(self.data.damage)
+                    elif self.data.projectiles:
+                        # must have projectiles
+                        self.create_projectile(current_target)
                     self.attack_cooldown = self.data.hit_speed
                 else:
                     self.attack_cooldown -= dt
@@ -265,20 +278,10 @@ class Building(Entity):
         self.target_id = target.id if target else None
         if target and self.attack_cooldown <= 0:
             if self.data.projectiles:
-                self._create_projectile(target)
+                self.create_projectile(target)
             else:
                 target.take_damage(self.data.damage)
             self.attack_cooldown = 1 / self.data.hit_speed
-
-    def _create_projectile(self, target: 'Entity') -> None:
-        """Create a projectile towards the target"""
-        projectile = Projectile(
-            id=self.battle_state.next_entity_id, position=Position(self.position.x, self.position.y),
-            player=self.player, source_card_name=self.data.name, target=target,
-        )
-        projectile.battle_state = self.battle_state
-        self.battle_state.entities[projectile.id] = projectile
-        self.battle_state.next_entity_id += 1
 
 class Projectile(Entity):
     def __init__(self, id, position, player, source_card_name, target, homing=True):
