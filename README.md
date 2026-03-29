@@ -22,6 +22,7 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - pathfinding and going around obstacles: done.
 - attacking and following enemy troops in sight: done.
 - creating projectiles: done.
+- handling entity collision: done.
 
 What's NOT done:
 - spawn and death effects
