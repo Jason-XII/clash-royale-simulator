@@ -1,6 +1,6 @@
 from .arena import TileGrid, Position
 from .player import PlayerState
-from .card_utils import Card
+from .card_utils import Card, TimedExplosiveData
 from fastcore.all import store_attr
 import math
 from itertools import combinations
@@ -153,8 +153,6 @@ class Troop(Entity):
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return # Haven't finished deploying yet
-
-
         # Logic: the troop may have a current target (or doesn't), and `get_nearest_target` also gives a
         # recommended target. If current target exists, compare that with the recommendation to see
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
@@ -185,7 +183,7 @@ class Troop(Entity):
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
                 self.move_towards(pathfind_target, dt)
-                self.attack_cooldown = self.data.load_time
+                self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt)
             else:
                 if self.attack_cooldown <= 0:
                     if self.data.damage:
@@ -325,6 +323,30 @@ class Projectile(Entity):
         self.position.x += step.real
         self.position.y += step.imag
 
+
+class TimedExplosive(Entity):
+    def __init__(self, id, position, player, card_name):
+        super().__init__(id, position, player, card_name)
+        self.dsd = TimedExplosiveData(self.data.death_spawn_data)
+        self.deploy_delay_remaining = self.dsd.deploy_time
+        self.name = self.dsd.name
+
+    def update(self, dt):
+        if not self.is_alive: return
+        if self.deploy_delay_remaining > 0:
+            self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
+            return
+        for entity in self.battle_state.entities.values():
+            if not entity.is_alive or entity.player == self.player: continue
+            if entity.position.distance_to(self.position) - entity.data.collision_radius < self.dsd.range:
+                entity.take_damage(self.dsd.damage)
+        self.is_alive = False
+
+    def take_damage(self, amount: float):
+        # Bombs does not take damage!
+        pass
+
+
 def get_spawn_position(card_info, position):
     spawn_number, spawn_delay, r = card_info.spawn_number, card_info.spawn_delay, card_info.spawn_radius
     if spawn_number == 1: return [Position(position.x, position.y)]
@@ -432,5 +454,8 @@ class BattleState:
                 if each.name == 'KingTower' and each.player == player:
                     each.tower_active = True
                     break
+        elif entity.name == 'Balloon':
+            bomb = TimedExplosive(self.next_entity_id, entity.position, entity.player, entity.name)
+            self._spawn_entity(bomb)
 
 

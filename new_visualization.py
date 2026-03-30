@@ -91,11 +91,11 @@ class Visualizer:
         pygame.quit()
 
 player_0_deck = ['Balloon', 'Giant']*4
-player_1_deck = ['Pekka', 'Knight']*4
+player_1_deck = ['MiniPekka', 'Knight']*4
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('Pekka', (17.5, 30.5), player=1)
-    v.deploy('Knight', (17.5, 30.5), player=1, delay=1)
+    v.deploy('MiniPekka', (17.5, 30.5), player=1)
+    # v.deploy('Knight', (17.5, 30.5), player=1, delay=1)
     v.deploy('Balloon', (9.5, 0.5))
-    v.deploy('Giant', (10.5, 6.5), delay=2)
+    # v.deploy('Giant', (10.5, 6.5), delay=2)
     v.run()

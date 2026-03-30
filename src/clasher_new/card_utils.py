@@ -66,6 +66,8 @@ class Card:
 
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
 
+        self.death_spawn_data = self.data['summonCharacterData'].get('deathSpawnCharacterData', {})
+
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.25
 
@@ -84,6 +86,15 @@ class Projectile:
         if self.data.get('name') == 'TowerPrincessProjectile':
             self.hits_air = True
             self.hits_ground = True
+
+class TimedExplosiveData:
+    def __init__(self, death_spawn_data):
+        self.data = death_spawn_data
+        self.name = self.data['name']
+        self.damage = self.data['deathDamage']
+        self.deploy_time = self.data['deployTime'] / 1000
+        self.collision_radius = self.data['collisionRadius'] / 1000
+        self.range = 3.0
 
 class AreaEffectData:
     def __init__(self, area_effect_data):
