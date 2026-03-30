@@ -326,11 +326,11 @@ class Projectile(Entity):
 
 def get_spawn_position(card_info, position):
     spawn_number, spawn_delay, r = card_info.spawn_number, card_info.spawn_delay, card_info.spawn_radius
-    print(spawn_delay, spawn_number, r)
     if spawn_number == 1: return [Position(position.x, position.y)]
     positions = []
+    angle_offset = {2: 0, 3: math.pi/2, 4: math.pi/4, 6: 0}
     for i in range(spawn_number):
-        angle = 2*math.pi*i/spawn_number
+        angle = 2*math.pi*i/spawn_number+angle_offset[spawn_number]
         dx, dy = r*math.cos(angle), r*math.sin(angle)
         positions.append(Position(position.x+dx, position.y+dy))
     return positions
@@ -364,7 +364,10 @@ class BattleState:
         self.next_entity_id += 1
 
     def delayed_spawn(self, entity, delay):
-        self.schedule.append((entity, self.time+delay))
+        if delay:
+            self.schedule.append((entity, self.time+delay))
+        else:
+            self._spawn_entity(entity)
 
     def step(self, dt):
         for each in self.players:
@@ -384,8 +387,11 @@ class BattleState:
         card_info = Card(card_name)
 
         positions = get_spawn_position(card_info, position)
+        print(card_name, position, card_info.spawn_delay)
+        delayed_counter = card_info.spawn_delay
         for p in positions:
-            self._spawn_entity(Troop(len(self.entities)+1, p, player_id, card_name))
+            self.delayed_spawn(Troop(len(self.entities)+1, p, player_id, card_name), delayed_counter)
+            delayed_counter += card_info.spawn_delay
         return True
 
     def ground_walkable(self, position, mover_radius):
