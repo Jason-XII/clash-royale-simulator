@@ -52,7 +52,7 @@ class Card:
         self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
         self.speed = self.data['summonCharacterData'].get('speed', 0)/60
         self.target_only_buildings = self.data['summonCharacterData']['tidTarget'] == "TID_TARGETS_BUILDINGS"
-        self.is_air_unit = self.name in air_units
+        self.is_air_unit = self.name in air_units or self.data['summonCharacterData'].get('name', '') in air_units
         self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
         self.attack_ground = ('GROUND' in self.data['summonCharacterData']['tidTarget']) or self.target_only_buildings
         self.range = self.data['summonCharacterData']['range'] / 1000
@@ -97,4 +97,4 @@ class AreaEffectData:
 
 
 if __name__ == '__main__':
-    print(air_units)
+    print(Card('Minions').is_air_unit)

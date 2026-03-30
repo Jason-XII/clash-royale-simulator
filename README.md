@@ -37,7 +37,10 @@ What's NOT done:
 - Knight
 - Giant
 - Archers
-- 
+- Goblins
+- Pekka
+- MiniPekka
+- Minions
 
 ## Where is the code?
 

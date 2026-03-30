@@ -198,6 +198,7 @@ class Troop(Entity):
                     self.attack_cooldown -= dt
         else:
             # now calculate:
+            if self.data.is_air_unit: self.move_towards(self._get_basic_pathfind_target(), dt); return
             near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
             before_bridge = (self.position.y < 14.0 and self.player == 0) or (
                         self.position.y > 16.0 and self.player == 1)
