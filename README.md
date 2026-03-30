@@ -25,6 +25,7 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - handling entity collision: done.
 
 What's NOT done:
+- spawn swarm troops
 - spawn and death effects
 - horde spawning
 - spells

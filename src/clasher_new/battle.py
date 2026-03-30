@@ -98,7 +98,7 @@ class Troop(Entity):
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
-            angle_offsets = [i * math.pi / 16 for i in range(1, 16)] + [-i * math.pi / 16 for i in range(1, 16)]
+            angle_offsets = [i * math.pi / 16 for i in range(1, 17)] + [-i * math.pi / 16 for i in range(1, 17)]
             for angle_offset in angle_offsets:
                 new_angle = original_angle + angle_offset
                 new_move_x = math.cos(new_angle) * move_distance
@@ -324,6 +324,17 @@ class Projectile(Entity):
         self.position.x += step.real
         self.position.y += step.imag
 
+def get_spawn_position(card_info, position):
+    spawn_number, spawn_delay, r = card_info.spawn_number, card_info.spawn_delay, card_info.spawn_radius
+    print(spawn_delay, spawn_number, r)
+    if spawn_number == 1: return [Position(position.x, position.y)]
+    positions = []
+    for i in range(spawn_number):
+        angle = 2*math.pi*i/spawn_number
+        dx, dy = r*math.cos(angle), r*math.sin(angle)
+        positions.append(Position(position.x+dx, position.y+dy))
+    return positions
+
 
 class BattleState:
     def __init__(self, player_0: PlayerState, player_1: PlayerState):
@@ -371,12 +382,8 @@ class BattleState:
         if not self.players[player_id].can_play_card(card_name):
             return False
         card_info = Card(card_name)
-        spawn_number, spawn_delay = card_info.spawn_number, card_info.spawn_delay
-        if spawn_number == 1: positions = [Position(position.x, position.y)]
-        elif spawn_number == 2: positions = [Position(position.x-0.55, position.y),
-                                                           Position(position.x+0.55, position.y)]
-        else:
-            positions = [Position(position.x, position.y)]
+
+        positions = get_spawn_position(card_info, position)
         for p in positions:
             self._spawn_entity(Troop(len(self.entities)+1, p, player_id, card_name))
         return True
@@ -395,7 +402,7 @@ class BattleState:
         return False
 
     def resolve_collisions(self):
-        entities_alive = [each for each in self.entities.values() if each.is_alive and isinstance(each, Troop)]
+        entities_alive = [each for each in self.entities.values() if each.is_alive and isinstance(each, Troop) or isinstance(each, Building)]
         ground_troops = combinations([each for each in entities_alive if not each.data.is_air_unit], 2)
         flying_troops = combinations([each for each in entities_alive if each.data.is_air_unit], 2)
         for troop in (ground_troops, flying_troops):
