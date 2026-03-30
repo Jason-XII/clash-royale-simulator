@@ -42,6 +42,7 @@ class Card:
         self.name = self.data['name']
         self.damage = self.data['summonCharacterData'].get('damage', 0)
         self.spawn_number = self.data.get('summonNumber', 1)
+        self.spawn_delay = self.data.get('summonDeployDelay', 0)
 
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')

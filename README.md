@@ -31,6 +31,13 @@ What's NOT done:
 - evo, hero and elite card mechanics
 - ...
 
+### Characters implemented
+
+- Knight
+- Giant
+- Archers
+- 
+
 ## Where is the code?
 
 The folder structure of this repo is very complicated. I'm sorry for the inconvenience!

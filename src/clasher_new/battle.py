@@ -345,10 +345,15 @@ class BattleState:
         self._spawn_entity(Building(5, self.arena.RED_KING_TOWER, 1, 'KingTower', True))
         self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', True))
 
+        self.schedule = []
+
     def _spawn_entity(self, entity):
         entity.battle_state = self
         self.entities[len(self.entities)+1] = entity
         self.next_entity_id += 1
+
+    def delayed_spawn(self, entity, delay):
+        self.schedule.append((entity, self.time+delay))
 
     def step(self, dt):
         for each in self.players:
@@ -356,14 +361,19 @@ class BattleState:
         for entity in list(self.entities.values()):
             entity.update(dt)
         self.resolve_collisions()
+        for entity, spawn_time in self.schedule:
+            if self.time > spawn_time: self._spawn_entity(entity)
+        self.schedule = [each for each in self.schedule if each[1] > self.time]
         self.time += dt
         self.tick += 1
 
     def deploy_card(self, player_id, card_name, position):
         if not self.players[player_id].can_play_card(card_name):
             return False
-        if Card(card_name).spawn_number == 1: positions = [Position(position.x, position.y)]
-        elif Card(card_name).spawn_number == 2: positions = [Position(position.x-0.55, position.y),
+        card_info = Card(card_name)
+        spawn_number, spawn_delay = card_info.spawn_number, card_info.spawn_delay
+        if spawn_number == 1: positions = [Position(position.x, position.y)]
+        elif spawn_number == 2: positions = [Position(position.x-0.55, position.y),
                                                            Position(position.x+0.55, position.y)]
         else:
             positions = [Position(position.x, position.y)]
