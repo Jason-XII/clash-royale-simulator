@@ -157,6 +157,7 @@ class Troop(Entity):
         # recommended target. If current target exists, compare that with the recommendation to see
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
         # be none.
+        print(self.name, self.position.x, self.position.y, TileGrid().is_walkable(self.position))
         current_target = None
         if self.target_id is None or \
             self.target_id not in self.battle_state.entities or \
@@ -350,13 +351,14 @@ class TimedExplosive(Entity):
         pass
 
 
-def get_spawn_position(card_info, position):
+def get_spawn_position(card_info, position, player):
     spawn_number, spawn_delay, r = card_info.spawn_number, card_info.spawn_delay, card_info.spawn_radius
     if spawn_number == 1: return [Position(position.x, position.y)]
     positions = []
     angle_offset = {2: 0, 3: math.pi/2, 4: math.pi/4, 6: 0}
     for i in range(spawn_number):
         angle = 2*math.pi*i/spawn_number+angle_offset[spawn_number]
+        if player == 1: angle += math.pi
         dx, dy = r*math.cos(angle), r*math.sin(angle)
         positions.append(Position(position.x+dx, position.y+dy))
     return positions
@@ -412,7 +414,7 @@ class BattleState:
             return False
         card_info = Card(card_name)
 
-        positions = get_spawn_position(card_info, position)
+        positions = get_spawn_position(card_info, position, player_id)
         print(card_name, position, card_info.spawn_delay)
         delayed_counter = card_info.spawn_delay
         for p in positions:

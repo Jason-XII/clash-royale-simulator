@@ -25,10 +25,9 @@ class TileGrid:
     RIVER_Y2 = 16.0
     BLOCKED_TILES = [
         # Edge tiles next to river
-        (0, 14),   # Left edge of arena, bottom land next to river
-        (0, 17),   # Left edge of arena, top land next to river
-        (17, 14),  # Right edge of arena, bottom land next to river  
-        (17, 17),  # Right edge of arena, top land next to river
+        (0, 15), (0, 16), (1, 15), (1, 16),
+        *[(i, j) for i in range(5, 13) for j in range(15, 17)], # (5, 15) to (12, 16)
+        (16, 15), (16, 16), (17, 15), (17, 16),
         
         # Top row (y=0): 6 gray fences (0-5), 6 green king area (6-11), 6 gray fences (12-17)
         (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0),           # Left 6 gray fence tiles
@@ -154,3 +153,6 @@ class TileGrid:
                 x_max = tower_pos.x + radius
                 blocked_ranges.append((x_min, x_max))
         return blocked_ranges
+
+if __name__ == '__main__':
+    print(TileGrid().is_blocked_tile(int(6.9), int(16.001)))
