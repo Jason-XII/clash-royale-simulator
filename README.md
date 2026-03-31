@@ -41,6 +41,9 @@ What's NOT done:
 - Pekka
 - MiniPekka
 - Minions
+- Skeletons
+- SkeletonArmy
+- Balloon
 
 ## Where is the code?
 

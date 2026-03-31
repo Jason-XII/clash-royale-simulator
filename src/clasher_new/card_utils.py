@@ -76,7 +76,7 @@ class Projectile:
         self.data = projectile_data
         self.damage = self.data.get('damage')
         self.speed = self.data.get('speed', 0) / 60
-        self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0)
+        self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0) / 1000
         self.target_buff = self.data.get('targetBuffData', {})
         self.buff_time = self.data.get('buffTime', 0) / 1000
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')
