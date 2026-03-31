@@ -11,6 +11,8 @@ air_units = [each['name'] for each in extra if each['flying_height'] != 0]
 data = data['items']['spells']
 card_data = {each['name']: each for each in data}
 
+card_data['Golemite'] = {'name': 'Golemite', 'summonCharacterData':card_data['Golem']['summonCharacterData']['deathSpawnCharacterData']}
+
 # The king tower is not defined in `gamedata.json`, have to hard code it here.
 king_tower_stats = {
     'name': 'KingTower',
@@ -67,6 +69,7 @@ class Card:
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
 
         self.death_spawn_data = self.data['summonCharacterData'].get('deathSpawnCharacterData', {})
+        self.death_damage = self.data['summonCharacterData'].get('deathDamage', 0)
 
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.25

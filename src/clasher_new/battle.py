@@ -4,6 +4,15 @@ from .card_utils import Card, TimedExplosiveData
 from fastcore.all import store_attr
 import math
 from itertools import combinations
+from .card_mechanics import *
+
+class BasicCharacter:
+    def __init__(self, entity):
+        self.entity = entity
+        self.battle_state = self.entity.battle_state
+        self.data = self.entity.data
+    def on_tick(self, dt): pass
+    def on_death(self): pass
 
 class Entity:
     def __init__(self, id, position, player, card_name):
@@ -14,15 +23,25 @@ class Entity:
         self.speed = self.data.speed
         self.battle_state = None
         self.hp = self.data.hp
+        self.entity_holder = BasicCharacter(self)
+        if self.card_name.title() in globals():
+            self.entity_holder = eval(f"{self.card_name.title()}(self)")
+        self.target_id = None
 
-    def update(self, dt): raise NotImplementedError
+    def update(self, dt):
+        self.entity_holder.on_tick(dt)
 
     def take_damage(self, amount: float):
         """Apply damage to entity"""
         self.hp -= amount
         if self.hp <= 0 and self.is_alive:
             self.is_alive = False
-            self.battle_state.on_death(self)
+            self.entity_holder.on_death()
+            if self.data.death_damage:
+                for entity in self.battle_state.entities.values():
+                    if not entity.is_alive or entity.player == self.player: continue
+                    if entity.position.distance_to(self.position) - entity.data.collision_radius < 1:
+                        entity.take_damage(self.data.death_damage)
 
     def get_nearest_target(self):
         """Find nearest valid target with priority rules"""
@@ -62,6 +81,25 @@ class Entity:
             return True
         return False
 
+    def update_current_target(self):
+        current_target = None
+        if self.target_id is None or \
+                self.target_id not in self.battle_state.entities or \
+                not self.battle_state.entities.get(self.target_id).is_alive:
+            # doesn't have a valid prior target
+            self.target_id = None
+        else:
+            current_target = self.battle_state.entities.get(self.target_id)
+        best_target = self.get_nearest_target()
+        if self.target_id:
+            if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
+                current_target = best_target
+                self.target_id = current_target.id
+        else:
+            current_target = best_target
+            self.target_id = current_target.id if current_target else None
+        return current_target
+
     def create_projectile(self, target):
         if not self.data.projectiles: raise Exception('Entity does not have any projectiles.')
         projectile = Projectile(
@@ -75,7 +113,6 @@ class Troop(Entity):
     def __init__(self, id, position, player, card_name):
         super().__init__(id, position, player, card_name)
         self.deploy_delay_remaining = self.data.deploy_time
-        self.target_id = None
         self.name = self.data.name
         self.path_blocked_counter = 0
 
@@ -93,6 +130,7 @@ class Troop(Entity):
             self.position.x += move_x
             self.position.y += move_y
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
+            print('Moved new position:', self.position.x, self.position.y, move_x, move_y)
         else:
             # If direct path is blocked, try to find a way around
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
@@ -140,6 +178,7 @@ class Troop(Entity):
                 else: target = TileGrid.RED_RIGHT_TOWER
                 if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y >= 25.0:
                     target = TileGrid.RED_KING_TOWER
+                print('Recommended target: ', target)
                 return target
             else:
                 if near_left: target = TileGrid.BLUE_LEFT_TOWER
@@ -157,23 +196,9 @@ class Troop(Entity):
         # recommended target. If current target exists, compare that with the recommendation to see
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
         # be none.
-        print(self.name, self.position.x, self.position.y, TileGrid().is_walkable(self.position))
-        current_target = None
-        if self.target_id is None or \
-            self.target_id not in self.battle_state.entities or \
-                not self.battle_state.entities.get(self.target_id).is_alive:
-            # doesn't have a valid prior target
-            self.target_id = None
-        else:
-            current_target = self.battle_state.entities.get(self.target_id)
-        best_target = self.get_nearest_target()
-        if self.target_id:
-            if self. _should_switch_target(self.battle_state.entities[self.target_id], best_target):
-                current_target = best_target
-                self.target_id = current_target.id
-        else:
-            current_target = best_target
-            self.target_id = current_target.id if current_target else None
+        super().update(dt)
+        print(self.name, self.id,  self.position.x, self.position.y)
+        current_target = self.update_current_target()
 
         if current_target:
             # Move towards target if out of attack range
@@ -274,8 +299,7 @@ class Building(Entity):
             decay = (self.data.hp / float(self.data.lifetime)) * dt
             self.take_damage(decay)
         if self.attack_cooldown > 0: self.attack_cooldown -= dt
-        target = self.get_nearest_target()
-        self.target_id = target.id if target else None
+        target = self.update_current_target()
         if target and self.attack_cooldown <= 0:
             if self.data.projectiles:
                 self.create_projectile(target)
@@ -351,13 +375,14 @@ class TimedExplosive(Entity):
         pass
 
 
-def get_spawn_position(card_info, position, player):
+def get_spawn_position(card_info, position, player, offset_angle=True):
     spawn_number, spawn_delay, r = card_info.spawn_number, card_info.spawn_delay, card_info.spawn_radius
     if spawn_number == 1: return [Position(position.x, position.y)]
     positions = []
     angle_offset = {2: 0, 3: math.pi/2, 4: math.pi/4, 6: 0}
     for i in range(spawn_number):
-        angle = 2*math.pi*i/spawn_number+angle_offset.get(spawn_number, 0)
+        angle = 2*math.pi*i/spawn_number
+        if offset_angle: angle += angle_offset.get(spawn_number, 0)
         if player == 1: angle += math.pi
         dx, dy = r*math.cos(angle), r*math.sin(angle)
         positions.append(Position(position.x+dx, position.y+dy))
@@ -433,6 +458,7 @@ class BattleState:
         print(card_name, position, card_info.spawn_delay)
         delayed_counter = card_info.spawn_delay
         for p in positions:
+            print(card_name, 'entering delayed spawn')
             self.delayed_spawn(Troop(len(self.entities)+1, p, player_id, card_name), delayed_counter)
             delayed_counter += card_info.spawn_delay
         return True
@@ -451,7 +477,7 @@ class BattleState:
         return False
 
     def resolve_collisions(self):
-        entities_alive = [each for each in self.entities.values() if each.is_alive and isinstance(each, Troop) or isinstance(each, Building)]
+        entities_alive = [each for each in self.entities.values() if each.is_alive and (isinstance(each, Troop) or isinstance(each, Building))]
         ground_troops = combinations([each for each in entities_alive if not each.data.is_air_unit], 2)
         flying_troops = combinations([each for each in entities_alive if each.data.is_air_unit], 2)
         for troop in (ground_troops, flying_troops):
@@ -462,6 +488,7 @@ class BattleState:
                     direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
                     direction_vector /= abs(direction_vector)
                     movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
+                    print('nudging,', e1.id, e2.id)
                     e2.position.x += direction_vector.real*movement_ratio*overlap
                     e2.position.y += direction_vector.imag*movement_ratio*overlap
                     e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap
@@ -474,8 +501,5 @@ class BattleState:
                 if each.name == 'KingTower' and each.player == player:
                     each.tower_active = True
                     break
-        elif entity.name == 'Balloon':
-            bomb = TimedExplosive(self.next_entity_id, entity.position, entity.player, entity.name)
-            self._spawn_entity(bomb)
 
 

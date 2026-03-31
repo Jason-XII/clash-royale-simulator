@@ -23,11 +23,10 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - attacking and following enemy troops in sight: done.
 - creating projectiles: done.
 - handling entity collision: done.
+- periodic spawning, death damage, death spawning
 
 What's NOT done:
-- spawn swarm troops
 - spawn and death effects
-- horde spawning
 - spells
 - evo, hero and elite card mechanics
 - ...
@@ -44,6 +43,9 @@ What's NOT done:
 - Skeletons
 - SkeletonArmy
 - Balloon
+- Witch
+- Barbarians
+- Golem
 
 ## Where is the code?
 
