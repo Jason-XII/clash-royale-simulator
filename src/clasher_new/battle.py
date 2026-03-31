@@ -29,7 +29,7 @@ class Entity:
         building_targets = []
         troop_targets = []
         for entity in list(self.battle_state.entities.values()):
-            if type(entity).__name__ in {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect'} or \
+            if type(entity).__name__ in {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect', 'TimedExplosive'} or \
                     not (entity.is_alive and entity.player != self.player): continue # exclude spells or stealth entities
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
@@ -299,7 +299,10 @@ class Projectile(Entity):
         target_position_final = self.target_position if not self.homing else self.target.position
         distance = self.position.distance_to(target_position_final)
         if distance <= self.proj.speed * dt:
-            self.target.take_damage(self.proj.damage)
+            if not self.proj.radius:
+                self.target.take_damage(self.proj.damage)
+            else:
+                self._deal_splash_damage()
             self.is_alive = False
         else:
             self._move_towards(target_position_final, dt)
