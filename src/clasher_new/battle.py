@@ -168,7 +168,7 @@ class Troop(Entity):
             current_target = self.battle_state.entities.get(self.target_id)
         best_target = self.get_nearest_target()
         if self.target_id:
-            if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
+            if self. _should_switch_target(self.battle_state.entities[self.target_id], best_target):
                 current_target = best_target
                 self.target_id = current_target.id
         else:
@@ -357,7 +357,7 @@ def get_spawn_position(card_info, position, player):
     positions = []
     angle_offset = {2: 0, 3: math.pi/2, 4: math.pi/4, 6: 0}
     for i in range(spawn_number):
-        angle = 2*math.pi*i/spawn_number+angle_offset[spawn_number]
+        angle = 2*math.pi*i/spawn_number+angle_offset.get(spawn_number, 0)
         if player == 1: angle += math.pi
         dx, dy = r*math.cos(angle), r*math.sin(angle)
         positions.append(Position(position.x+dx, position.y+dy))
@@ -386,7 +386,20 @@ class BattleState:
 
         self.schedule = []
 
+    def ensure_walkability(self, entity):
+        if not self.ground_walkable(entity.position, entity.data.collision_radius):
+            x, y, r = entity.position.x, entity.position.y, entity.data.collision_radius
+            if y < 0: y=r
+            elif y > 32: y=32-r
+            if x < 0: x=r
+            elif x > 18: x=18-r
+            if 15 < y < 17:
+                y = 15-r if y-15 < 17-y else 17+r
+            entity.position.x = x
+            entity.position.y = y
+
     def _spawn_entity(self, entity):
+        self.ensure_walkability(entity)
         entity.battle_state = self
         self.entities[len(self.entities)+1] = entity
         self.next_entity_id += 1
@@ -402,7 +415,9 @@ class BattleState:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):
             entity.update(dt)
+            self.ensure_walkability(entity)
         self.resolve_collisions()
+
         for entity, spawn_time in self.schedule:
             if self.time > spawn_time: self._spawn_entity(entity)
         self.schedule = [each for each in self.schedule if each[1] > self.time]
