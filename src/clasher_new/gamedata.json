@@ -1130,7 +1130,7 @@
             "rarity": "Common",
             "sightRange": 5500,
             "deployTime": 1000,
-            "chargeRange": 200,
+            "chargeRange": 3500,
             "speed": 60,
             "hitpoints": 750,
             "hitSpeed": 1400,

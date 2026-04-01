@@ -5,14 +5,7 @@ from fastcore.all import store_attr
 import math
 from itertools import combinations
 from .card_mechanics import *
-
-class BasicCharacter:
-    def __init__(self, entity):
-        self.entity = entity
-        self.battle_state = self.entity.battle_state
-        self.data = self.entity.data
-    def on_tick(self, dt): pass
-    def on_death(self): pass
+from .core import BasicCharacter
 
 class Entity:
     def __init__(self, id, position, player, card_name):
@@ -70,7 +63,7 @@ class Entity:
 
     def _should_switch_target(self, current_target, new_target):
         """Determine if we should switch from current target to new target"""
-        if self.position.distance_to(new_target.position)-self.data.collision_radius-new_target.data.collision_radius < self.data.sight_range: return False
+        if self.position.distance_to(new_target.position)-self.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
         if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius:
             return False
@@ -197,11 +190,10 @@ class Troop(Entity):
         # be none.
         super().update(dt)
         current_target = self.update_current_target()
-        if self.name == 'Valkyrie': print(self.attack_cooldown)
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + self.data.collision_radius):
+            if distance > (self.data.range + current_target.data.collision_radius):
                 if self.data.is_air_unit:
                     pathfind_target = current_target.position
                 else:
@@ -211,16 +203,7 @@ class Troop(Entity):
 
             else:
                 if self.attack_cooldown <= 0:
-                    if self.data.damage:
-                        if self.data.area_damage_radius:
-                            self.battle_state.deal_area_damage(self.player, self.position, self.data.area_damage_radius, self.data.damage,
-                                                               self.data.attack_air, self.data.attack_ground)
-                        else:
-                            current_target.take_damage(self.data.damage)
-                    elif self.data.projectiles:
-                        # must have projectiles
-                        self.create_projectile(current_target)
-                    self.attack_cooldown = self.data.hit_speed
+                    self.entity_holder.on_attack(current_target)
                 else:
                     self.attack_cooldown -= dt
         else:

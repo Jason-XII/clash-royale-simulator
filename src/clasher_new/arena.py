@@ -1,12 +1,5 @@
 from dataclasses import dataclass
-import math
-
-@dataclass 
-class Position:
-    x: float
-    y: float
-    def distance_to(self, other):
-        return math.hypot(self.x-other.x, self.y-other.y)
+from .core import Position
 
 
 @dataclass

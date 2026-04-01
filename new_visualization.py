@@ -88,12 +88,12 @@ class Visualizer:
             self.clock.tick(60)
         pygame.quit()
 
-player_0_deck = ['Valkyrie', 'Golem']*4
-player_1_deck = ['SkeletonArmy', 'Knight']*4
+player_0_deck = ['SkeletonArmy', 'Bomber']*4
+player_1_deck = ['Prince', 'Knight']*4
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('Valkyrie', (14.5, 12.5))
+    # v.deploy('SkeletonArmy', (14.5, 12.5))
     # v.deploy('Archer', (14.5, 29.5), player=1, delay=2)
     # v.deploy('Giant', (10.5, 6.5), delay=2)
-    v.deploy('SkeletonArmy', (14.5, 17.5), player=1)
+    v.deploy('Prince', (14.5, 17.5), player=1)
     v.run()

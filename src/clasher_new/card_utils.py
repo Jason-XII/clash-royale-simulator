@@ -60,7 +60,7 @@ class Card:
         self.range = self.data['summonCharacterData']['range'] / 1000
         self.sight_range = self.data['summonCharacterData']['sightRange'] / 1000
         self.deploy_time = self.data['summonCharacterData'].get('deployTime', 0) / 1000
-        self.charge_range = self.data['summonCharacterData'].get('chargeRange')
+        self.charge_range = self.data['summonCharacterData'].get('chargeRange', 0) / 1000
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData', {}))
         self.area_effect_data = AreaEffectData(self.data.get('areaEffectObjectData', {}))

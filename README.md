@@ -47,6 +47,9 @@ What's NOT done:
 - Barbarians
 - Golem
 - Valkyrie
+- Bomber
+- Musketeer
+- BabyDragon
 
 ## Where is the code?
 
