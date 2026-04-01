@@ -1,11 +1,11 @@
-from .arena import TileGrid, Position
-from .player import PlayerState
-from .card_utils import Card, TimedExplosiveData
+from arena import TileGrid
+from player import PlayerState
+from card_mechanics import *
+from card_utils import Card, TimedExplosiveData
 from fastcore.all import store_attr
 import math
 from itertools import combinations
-from .card_mechanics import *
-from .core import BasicCharacter
+
 
 class Entity:
     def __init__(self, id, position, player, card_name):
@@ -46,7 +46,7 @@ class Entity:
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
-            if distance-self.data.collision_radius-entity.data.collision_radius <= self.data.sight_range:
+            if distance-entity.data.collision_radius-self.data.collision_radius <= self.data.sight_range:
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -57,21 +57,22 @@ class Entity:
         else:
             targets = troop_targets if troop_targets else building_targets
 
-        targets.sort()
+        targets.sort(key=lambda x: x[0])
         if not targets: return None
         else: return targets[0][1]
 
     def _should_switch_target(self, current_target, new_target):
         """Determine if we should switch from current target to new target"""
-        if self.position.distance_to(new_target.position)-self.data.collision_radius < self.data.sight_range: return False
+        # if self.position.distance_to(new_target.position)-current_target.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
-        if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius:
+        if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius + self.data.collision_radius:
             return False
         # Always switch to troops in sight range (higher priority than buildings)
         is_current_building = isinstance(current_target, Building)
         is_new_troop = not isinstance(new_target, Building)
         if is_new_troop and is_current_building:
             return True
+        if self.position.distance_to(current_target.position) > self.position.distance_to(new_target.position): return True
         return False
 
     def update_current_target(self):
@@ -83,6 +84,9 @@ class Entity:
             self.target_id = None
         else:
             current_target = self.battle_state.entities.get(self.target_id)
+            if current_target.position.distance_to(self.position) - current_target.data.collision_radius - self.data.collision_radius > self.data.sight_range:
+                current_target = None
+                self.target_id = None
         best_target = self.get_nearest_target()
         if self.target_id:
             if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
@@ -125,6 +129,7 @@ class Troop(Entity):
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
             # If direct path is blocked, try to find a way around
+            print('blocked, current position:', self.position.x, self.position.y)
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -135,10 +140,13 @@ class Troop(Entity):
                 new_move_y = math.sin(new_angle) * move_distance
                 if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
-                    if new_move_x*move_x+new_move_y*move_y > 0:
+                    print('Preparing to move to:', self.position.x+new_move_x, self.position.y+new_move_y)
+                    if new_move_x*move_x+new_move_y*move_y >= -0.0001:
                         self.position.x += new_move_x
                         self.position.y += new_move_y
                         break
+                    else:
+                        print('Failed', new_move_x*move_x+new_move_y*move_y)
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -170,7 +178,6 @@ class Troop(Entity):
                 else: target = TileGrid.RED_RIGHT_TOWER
                 if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y >= 25.0:
                     target = TileGrid.RED_KING_TOWER
-                print('Recommended target: ', target)
                 return target
             else:
                 if near_left: target = TileGrid.BLUE_LEFT_TOWER
@@ -193,7 +200,7 @@ class Troop(Entity):
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius):
+            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius):
                 if self.data.is_air_unit:
                     pathfind_target = current_target.position
                 else:
@@ -441,10 +448,8 @@ class BattleState:
         card_info = Card(card_name)
 
         positions = get_spawn_position(card_info, position, player_id)
-        print(card_name, position, card_info.spawn_delay)
         delayed_counter = card_info.spawn_delay
         for p in positions:
-            print(card_name, 'entering delayed spawn')
             self.delayed_spawn(Troop(len(self.entities)+1, p, player_id, card_name), delayed_counter)
             delayed_counter += card_info.spawn_delay
         return True

@@ -1,5 +1,5 @@
 import pygame
-from battle import BattleState
+from battle import BattleState, Building
 from arena import Position
 from player import PlayerState
 
@@ -54,6 +54,9 @@ class Visualizer:
                 bw = max(r*2, 16)
                 pygame.draw.rect(self.screen, BLACK, (sx-bw//2-1, sy-r-12, bw+2, 5))
                 pygame.draw.rect(self.screen, GREEN, (sx-bw//2, sy-r-11, (e.hp/e.data.hp)*bw, 3))
+                if isinstance(e, Building):
+                    hp_txt = self.font.render(str(int(e.hp)), True, WHITE)
+                    self.screen.blit(hp_txt, hp_txt.get_rect(center=(sx, sy)))
 
     def draw_ui(self):
         txt = self.font.render(f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x", True, BLACK)

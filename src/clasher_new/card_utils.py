@@ -45,7 +45,7 @@ class Card:
         self.damage = self.data['summonCharacterData'].get('damage', 0)
         self.spawn_number = self.data.get('summonNumber', 1)
         self.spawn_delay = self.data.get('summonDeployDelay', 0) / 1000
-        self.spawn_radius = self.data.get('summonRadius', 600) / 1000
+        self.spawn_radius = self.data.get('summonRadius', 550) / 1000
 
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
@@ -106,9 +106,3 @@ class AreaEffectData:
         self.buff_data = self.data.get('buffData', {})
         self.speed_multiplier = self.buff_data.get('speedMultiplier')
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
-
-
-
-
-if __name__ == '__main__':
-    print(Card('Minions').is_air_unit)

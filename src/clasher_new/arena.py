@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .core import Position
+from core import Position
 
 
 @dataclass
