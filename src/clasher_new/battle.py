@@ -130,7 +130,6 @@ class Troop(Entity):
             self.position.x += move_x
             self.position.y += move_y
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
-            print('Moved new position:', self.position.x, self.position.y, move_x, move_y)
         else:
             # If direct path is blocked, try to find a way around
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
@@ -197,23 +196,27 @@ class Troop(Entity):
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
         # be none.
         super().update(dt)
-        print(self.name, self.id,  self.position.x, self.position.y)
         current_target = self.update_current_target()
-
+        if self.name == 'Valkyrie': print(self.attack_cooldown)
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius):
+            if distance > (self.data.range + self.data.collision_radius):
                 if self.data.is_air_unit:
                     pathfind_target = current_target.position
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
                 self.move_towards(pathfind_target, dt)
                 self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt)
+
             else:
                 if self.attack_cooldown <= 0:
                     if self.data.damage:
-                        current_target.take_damage(self.data.damage)
+                        if self.data.area_damage_radius:
+                            self.battle_state.deal_area_damage(self.player, self.position, self.data.area_damage_radius, self.data.damage,
+                                                               self.data.attack_air, self.data.attack_ground)
+                        else:
+                            current_target.take_damage(self.data.damage)
                     elif self.data.projectiles:
                         # must have projectiles
                         self.create_projectile(current_target)
@@ -488,7 +491,6 @@ class BattleState:
                     direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
                     direction_vector /= abs(direction_vector)
                     movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
-                    print('nudging,', e1.id, e2.id)
                     e2.position.x += direction_vector.real*movement_ratio*overlap
                     e2.position.y += direction_vector.imag*movement_ratio*overlap
                     e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap
@@ -501,5 +503,15 @@ class BattleState:
                 if each.name == 'KingTower' and each.player == player:
                     each.tower_active = True
                     break
+
+    def deal_area_damage(self, from_player, position, range, amount, attack_air, attack_ground):
+        for entity in self.entities.values():
+            if not entity.is_alive or entity.player == from_player: continue
+            if attack_air and entity.data.is_air_unit:
+                if entity.position.distance_to(position) < range:
+                    entity.take_damage(amount)
+            elif attack_ground and not entity.data.is_air_unit:
+                if entity.position.distance_to(position) < range:
+                    entity.take_damage(amount)
 
 

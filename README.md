@@ -28,7 +28,7 @@ In the end, I realized that the only way to make all of this work is to re-imple
 What's NOT done:
 - spawn and death effects
 - spells
-- evo, hero and elite card mechanics
+- evo, hero and champion card mechanics
 - ...
 
 ### Characters implemented
@@ -46,6 +46,7 @@ What's NOT done:
 - Witch
 - Barbarians
 - Golem
+- Valkyrie
 
 ## Where is the code?
 
