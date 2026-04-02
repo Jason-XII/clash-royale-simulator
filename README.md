@@ -54,6 +54,7 @@ What's NOT done:
 - Prince
 - Wizard
 - SpearGoblins
+- GiantSkeleton
 
 ## Where is the code?
 

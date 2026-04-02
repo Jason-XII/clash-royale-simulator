@@ -18,8 +18,8 @@ class Entity:
         self.hp = self.data.hp
         self.entity_holder = BasicCharacter(self)
         self.jumping_across_river = False
-        if self.card_name.title() in globals():
-            self.entity_holder = eval(f"{self.card_name.title()}(self)")
+        if self.card_name in globals():
+            self.entity_holder = eval(f"{self.card_name}(self)")
         self.target_id = None
 
     def update(self, dt):
@@ -381,7 +381,6 @@ class TimedExplosive(Entity):
         self.dsd = TimedExplosiveData(self.data.death_spawn_data)
         self.deploy_delay_remaining = self.dsd.deploy_time
         self.name = self.dsd.name
-        print('Spawned bomb')
 
     def update(self, dt):
         if not self.is_alive: return
