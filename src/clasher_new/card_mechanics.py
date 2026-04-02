@@ -66,3 +66,10 @@ class Prince(BasicCharacter):
             self.starting_position = Position(self.entity.position.x, self.entity.position.y)
             self.entity.speed = self.entity.data.speed
         self.entity.attack_cooldown = self.entity.data.hit_speed
+
+class GiantSkeleton(BasicCharacter):
+    def on_death(self):
+        from battle import TimedExplosive
+        bomb = TimedExplosive(self.battle_state.next_entity_id, self.entity.position, self.entity.player,
+                              self.entity.name)
+        self.battle_state._spawn_entity(bomb)

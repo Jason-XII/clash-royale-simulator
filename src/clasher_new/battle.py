@@ -144,7 +144,8 @@ class Troop(Entity):
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
             # If direct path is blocked, try to find a way around
-            # print('blocked, current position:', self.name, self.position.x, self.position.y)
+            print('blocked, current position:', self.name, self.position.x, self.position.y)
+
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -182,7 +183,7 @@ class Troop(Entity):
         near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
         on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
                     abs(self.position.y - 16.0) <= 1.0)
-        before_bridge = (self.position.y < 14.0 and self.player==0) or (self.position.y > 16.0 and self.player==1)
+        before_bridge = (self.position.y < 15.0 and self.player==0) or (self.position.y > 17.0 and self.player==1)
         if before_bridge and not on_bridge:
             possible_x = [3, 14]
             possible_y = [15, 17]
@@ -213,7 +214,6 @@ class Troop(Entity):
         # be none.
         super().update(dt)
         if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
-            print('Stopped jumping.')
             self.jumping_across_river = False
             self.data.is_air_unit = Card(self.name).is_air_unit
             self.speed = self.data.speed
@@ -245,8 +245,8 @@ class Troop(Entity):
             # now calculate:
             if self.data.is_air_unit: self.move_towards(self._get_basic_pathfind_target(), dt); return
             near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
-            before_bridge = (self.position.y < 14.0 and self.player == 0) or (
-                        self.position.y > 16.0 and self.player == 1)
+            before_bridge = (self.position.y < 15.0 and self.player == 0) or (
+                        self.position.y > 17.0 and self.player == 1)
             if near_left and before_bridge and self.player == 0:
                 if 2.5 <= self.position.x <= 4.5:
                     dx = 0
@@ -254,7 +254,7 @@ class Troop(Entity):
                     dx = 2.5-self.position.x
                 else:
                     dx = 4.5-self.position.x
-                dy = 14.0-self.position.y
+                dy = 15.0-self.position.y
             elif not near_left and before_bridge and self.player == 0:
                 if 13.5 <= self.position.x <= 15.5:
                     dx = 0
@@ -262,7 +262,7 @@ class Troop(Entity):
                     dx = 13.5-self.position.x
                 else:
                     dx = 15.5-self.position.x
-                dy = 14.0-self.position.y
+                dy = 15.0-self.position.y
             elif self.player == 0:
                 self.move_towards(self._get_basic_pathfind_target(), dt)
                 return
@@ -273,7 +273,7 @@ class Troop(Entity):
                     dx = 2.5-self.position.x
                 else:
                     dx = 4.5-self.position.x
-                dy = 16.0-self.position.y
+                dy = 17.0-self.position.y
             elif not near_left and before_bridge and self.player == 1:
                 if 13.5 <= self.position.x <= 15.5:
                     dx = 0
@@ -281,11 +281,13 @@ class Troop(Entity):
                     dx = 13.5 - self.position.x
                 else:
                     dx = 15.5 - self.position.x
-                dy = 16.0 - self.position.y
+                dy = 17.0 - self.position.y
             else:
                 self.move_towards(self._get_basic_pathfind_target(), dt)
                 return
             distance = dt * self.data.speed
+            dx = (dx/math.hypot(dx, dy))*distance
+            dy = (dy/math.hypot(dx, dy))*distance
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
             real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
             if not self.path_blocked_counter:
@@ -379,6 +381,7 @@ class TimedExplosive(Entity):
         self.dsd = TimedExplosiveData(self.data.death_spawn_data)
         self.deploy_delay_remaining = self.dsd.deploy_time
         self.name = self.dsd.name
+        print('Spawned bomb')
 
     def update(self, dt):
         if not self.is_alive: return
@@ -388,7 +391,10 @@ class TimedExplosive(Entity):
         for entity in self.battle_state.entities.values():
             if not entity.is_alive or entity.player == self.player: continue
             if entity.position.distance_to(self.position) - entity.data.collision_radius < self.dsd.range:
-                entity.take_damage(self.dsd.damage)
+                if entity.name in ('King_PrincessTower', 'KingTower'):
+                    entity.take_damage(self.dsd.damage*self.dsd.crown_tower_damage_percent)
+                else:
+                    entity.take_damage(self.dsd.damage)
         self.is_alive = False
 
     def take_damage(self, amount: float):
@@ -440,17 +446,16 @@ class BattleState:
 
     def ensure_walkability(self, entity):
         if entity.jumping_across_river and self.in_river(entity.position): return
-        if isinstance(entity, Building): return
+        if isinstance(entity, Building) or isinstance(entity, Projectile): return
 
         if not self.ground_walkable(entity.position, entity.data.collision_radius):
-            if entity.name == 'Prince': print('Prevents jumping')
             x, y, r = entity.position.x, entity.position.y, entity.data.collision_radius
             push_ratio = 0.5
-            if y < 0: y=r
-            elif y > 32: y=32-push_ratio*r
-            if x < 0: x=r
-            elif x > 18: x=18-push_ratio*r
-            if 15 < y < 17:
+            if y < push_ratio*r: y=push_ratio*r
+            elif y > 32-push_ratio*r: y=32-push_ratio*r
+            if x < push_ratio*r: x=r
+            elif x > 18-push_ratio*r: x=18-push_ratio*r
+            if 15-push_ratio*r < y < 17+push_ratio*r:
                 y = 15-push_ratio*r if y-15 < 17-y else 17+push_ratio*r
             entity.position.x = x
             entity.position.y = y

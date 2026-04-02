@@ -52,6 +52,8 @@ What's NOT done:
 - Musketeer
 - BabyDragon
 - Prince
+- Wizard
+- SpearGoblins
 
 ## Where is the code?
 

@@ -101,6 +101,7 @@ class TimedExplosiveData:
         self.deploy_time = self.data['deployTime'] / 1000
         self.collision_radius = self.data['collisionRadius'] / 1000
         self.range = 3.0
+        self.crown_tower_damage_percent = self.data.get('crownTowerDamagePercent', 100) / 100
 
 class AreaEffectData:
     def __init__(self, area_effect_data):

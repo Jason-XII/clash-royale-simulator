@@ -1355,7 +1355,7 @@
               "name": "GiantSkeletonBomb",
               "rarity": "Common",
               "deployTime": 3000,
-              "crownTowerDamagePercent": 100,
+              "crownTowerDamagePercent": 200,
               "deathDamage": 209,
               "collisionRadius": 450,
               "tid": "TID_BUILDING_GIANT_SKELETON_BOMB",
