@@ -91,12 +91,12 @@ class Visualizer:
             self.clock.tick(60)
         pygame.quit()
 
-player_0_deck = ['Witch', 'Bomber']*4
+player_0_deck = ['Skeletons', 'Bomber']*4
 player_1_deck = ['Prince', 'Knight']*4
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('Witch', (10.5, 10.5))
+    v.deploy('Skeletons', (10.5, 14.5))
     # v.deploy('Archer', (14.5, 29.5), player=1, delay=2)
     # v.deploy('Giant', (10.5, 6.5), delay=2)
-    v.deploy('Prince', (14.5, 17.5), player=1)
+    v.deploy('Prince', (10.5, 17.5), player=1)
     v.run()

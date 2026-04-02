@@ -71,6 +71,9 @@ class Card:
         self.death_spawn_data = self.data['summonCharacterData'].get('deathSpawnCharacterData', {})
         self.death_damage = self.data['summonCharacterData'].get('deathDamage', 0)
 
+        self.jump_height = self.data['summonCharacterData'].get('jumpHeight', 0)
+        self.jump_speed = self.data['summonCharacterData'].get('jumpSpeed', 0) / 60
+
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.25
 

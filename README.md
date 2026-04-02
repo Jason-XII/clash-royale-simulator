@@ -24,6 +24,7 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - creating projectiles: done.
 - handling entity collision: done.
 - periodic spawning, death damage, death spawning
+- charging, jumping across rivers
 
 What's NOT done:
 - spawn and death effects
@@ -50,6 +51,7 @@ What's NOT done:
 - Bomber
 - Musketeer
 - BabyDragon
+- Prince
 
 ## Where is the code?
 

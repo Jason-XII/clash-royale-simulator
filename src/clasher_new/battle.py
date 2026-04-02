@@ -17,6 +17,7 @@ class Entity:
         self.battle_state = None
         self.hp = self.data.hp
         self.entity_holder = BasicCharacter(self)
+        self.jumping_across_river = False
         if self.card_name.title() in globals():
             self.entity_holder = eval(f"{self.card_name.title()}(self)")
         self.target_id = None
@@ -65,6 +66,7 @@ class Entity:
         """Determine if we should switch from current target to new target"""
         # if self.position.distance_to(new_target.position)-current_target.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
+        if not new_target: return True
         if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius + self.data.collision_radius:
             return False
         # Always switch to troops in sight range (higher priority than buildings)
@@ -91,7 +93,7 @@ class Entity:
         if self.target_id:
             if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
                 current_target = best_target
-                self.target_id = current_target.id
+                self.target_id = current_target.id if current_target else None
         else:
             current_target = best_target
             self.target_id = current_target.id if current_target else None
@@ -106,12 +108,25 @@ class Entity:
         self.battle_state.entities[projectile.id] = projectile
         self.battle_state.next_entity_id += 1
 
+    def on_both_sides_of_river(self, e2):
+        if isinstance(e2, Entity):
+            y = e2.position.y
+        else: y = e2.y
+        if self.position.y < 15.0: return y > 17.0
+        else: return y < 15.0
+
+    def near_river(self):
+        return abs(self.position.y-15.0)<self.data.collision_radius or abs(self.position.y-17.0)<self.data.collision_radius
+
 class Troop(Entity):
     def __init__(self, id, position, player, card_name):
         super().__init__(id, position, player, card_name)
         self.deploy_delay_remaining = self.data.deploy_time
         self.name = self.data.name
         self.path_blocked_counter = 0
+        self.jumping_across_river = False
+        self.start_jumping_position = None
+
 
     def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
@@ -129,7 +144,7 @@ class Troop(Entity):
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
             # If direct path is blocked, try to find a way around
-            print('blocked, current position:', self.position.x, self.position.y)
+            # print('blocked, current position:', self.name, self.position.x, self.position.y)
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -140,13 +155,14 @@ class Troop(Entity):
                 new_move_y = math.sin(new_angle) * move_distance
                 if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
-                    print('Preparing to move to:', self.position.x+new_move_x, self.position.y+new_move_y)
+                    # print('Preparing to move to:', self.position.x+new_move_x, self.position.y+new_move_y)
                     if new_move_x*move_x+new_move_y*move_y >= -0.0001:
                         self.position.x += new_move_x
                         self.position.y += new_move_y
                         break
                     else:
-                        print('Failed', new_move_x*move_x+new_move_y*move_y)
+                        # print('Failed', new_move_x*move_x+new_move_y*move_y)
+                        pass
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
         """Get pathfinding target using priority system with advanced post-tower-destruction logic:
@@ -196,18 +212,30 @@ class Troop(Entity):
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
         # be none.
         super().update(dt)
+        if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
+            print('Stopped jumping.')
+            self.jumping_across_river = False
+            self.data.is_air_unit = Card(self.name).is_air_unit
+            self.speed = self.data.speed
         current_target = self.update_current_target()
+
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius):
-                if self.data.is_air_unit:
+            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius) or self.jumping_across_river:
+                if self.data.is_air_unit or (self.data.jump_speed and self.on_both_sides_of_river(current_target) and
+                                            self.near_river()):
                     pathfind_target = current_target.position
+                    if not self.jumping_across_river:
+                        self.start_jumping_position = Position(self.position.x, self.position.y)
+                        self.jumping_across_river = True
+                        self.data.is_air_unit = True
+                        self.speed = self.data.jump_speed
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
                 self.move_towards(pathfind_target, dt)
                 self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt)
-
+                if self.jumping_across_river: self.attack_cooldown = 0
             else:
                 if self.attack_cooldown <= 0:
                     self.entity_holder.on_attack(current_target)
@@ -404,15 +432,26 @@ class BattleState:
 
         self.schedule = []
 
+    def in_river(self, position):
+        river_tiles = [(0, 15), (0, 16), (1, 15), (1, 16),
+            *[(i, j) for i in range(5, 13) for j in range(15, 17)], # (5, 15) to (12, 16)
+            (16, 15), (16, 16), (17, 15), (17, 16)]
+        return (int(position.x), int(position.y)) in river_tiles
+
     def ensure_walkability(self, entity):
+        if entity.jumping_across_river and self.in_river(entity.position): return
+        if isinstance(entity, Building): return
+
         if not self.ground_walkable(entity.position, entity.data.collision_radius):
+            if entity.name == 'Prince': print('Prevents jumping')
             x, y, r = entity.position.x, entity.position.y, entity.data.collision_radius
+            push_ratio = 0.5
             if y < 0: y=r
-            elif y > 32: y=32-r
+            elif y > 32: y=32-push_ratio*r
             if x < 0: x=r
-            elif x > 18: x=18-r
+            elif x > 18: x=18-push_ratio*r
             if 15 < y < 17:
-                y = 15-r if y-15 < 17-y else 17+r
+                y = 15-push_ratio*r if y-15 < 17-y else 17+push_ratio*r
             entity.position.x = x
             entity.position.y = y
 
