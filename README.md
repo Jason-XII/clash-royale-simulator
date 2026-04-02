@@ -55,6 +55,7 @@ What's NOT done:
 - Wizard
 - SpearGoblins
 - GiantSkeleton
+- HogRider
 
 ## Where is the code?
 

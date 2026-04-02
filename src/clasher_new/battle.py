@@ -66,15 +66,20 @@ class Entity:
         """Determine if we should switch from current target to new target"""
         # if self.position.distance_to(new_target.position)-current_target.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
-        if not new_target: return True
+        if not new_target:
+            print('Switching target because of no target in sight.')
+            return True
         if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius + self.data.collision_radius:
             return False
         # Always switch to troops in sight range (higher priority than buildings)
         is_current_building = isinstance(current_target, Building)
         is_new_troop = not isinstance(new_target, Building)
         if is_new_troop and is_current_building:
+            print('Found troop that takes higher priority')
             return True
-        if self.position.distance_to(current_target.position) > self.position.distance_to(new_target.position): return True
+        if self.position.distance_to(current_target.position) > self.position.distance_to(new_target.position):
+            print('Found nearer target that is not in attack range')
+            return True
         return False
 
     def update_current_target(self):
@@ -87,6 +92,9 @@ class Entity:
         else:
             current_target = self.battle_state.entities.get(self.target_id)
             if current_target.position.distance_to(self.position) - current_target.data.collision_radius - self.data.collision_radius > self.data.sight_range:
+                print(self.name, 'Lost target because out of sight range', current_target.position.distance_to(self.position),
+                      current_target.data.collision_radius, self.data.collision_radius)
+                print('Target is at', current_target.position.x, current_target.position.y, current_target.id)
                 current_target = None
                 self.target_id = None
         best_target = self.get_nearest_target()
@@ -97,6 +105,12 @@ class Entity:
         else:
             current_target = best_target
             self.target_id = current_target.id if current_target else None
+
+        if self.target_id and self.name == 'King_PrincessTowers':
+            print(self.name, 'Found target',
+                  current_target.position.distance_to(self.position),
+                  current_target.data.collision_radius, self.data.collision_radius)
+            print('Current target position is at', current_target.position.x, current_target.position.y, current_target.id )
         return current_target
 
     def create_projectile(self, target):
@@ -184,6 +198,11 @@ class Troop(Entity):
         on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
                     abs(self.position.y - 16.0) <= 1.0)
         before_bridge = (self.position.y < 15.0 and self.player==0) or (self.position.y > 17.0 and self.player==1)
+        if self.data.is_air_unit:
+            if self.player == 0:
+                return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
+            else:
+                return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
         if before_bridge and not on_bridge:
             possible_x = [3, 14]
             possible_y = [15, 17]
@@ -223,17 +242,17 @@ class Troop(Entity):
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
             if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius) or self.jumping_across_river:
-                if self.data.is_air_unit or (self.data.jump_speed and self.on_both_sides_of_river(current_target) and
-                                            self.near_river()):
+                has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river()
+                if self.data.is_air_unit or has_jump_ability:
                     pathfind_target = current_target.position
-                    if not self.jumping_across_river:
-                        print('Start jumping!')
-                        self.start_jumping_position = Position(self.position.x, self.position.y)
-                        self.jumping_across_river = True
-                        self.data.is_air_unit = True
-                        self.speed = self.data.jump_speed
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
+                if not self.jumping_across_river and has_jump_ability:
+                    print('Start jumping!')
+                    self.start_jumping_position = Position(self.position.x, self.position.y)
+                    self.jumping_across_river = True
+                    self.data.is_air_unit = True
+                    self.speed = self.data.jump_speed
                 self.move_towards(pathfind_target, dt)
                 self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt)
                 if self.jumping_across_river: self.attack_cooldown = 0
@@ -244,7 +263,9 @@ class Troop(Entity):
                     self.attack_cooldown -= dt
         else:
             # now calculate:
-            if self.data.is_air_unit: self.move_towards(self._get_basic_pathfind_target(), dt); return
+            if self.data.is_air_unit:
+                self.move_towards(self._get_basic_pathfind_target(), dt)
+                return
             near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
             before_bridge = (self.position.y < 15.0 and self.player == 0) or (
                         self.position.y > 17.0 and self.player == 1)
@@ -391,7 +412,7 @@ class TimedExplosive(Entity):
         for entity in self.battle_state.entities.values():
             if not entity.is_alive or entity.player == self.player: continue
             if entity.position.distance_to(self.position) - entity.data.collision_radius < self.dsd.range:
-                if entity.name in ('King_PrincessTower', 'KingTower'):
+                if entity.name in ('King_PrincessTowers', 'KingTower'):
                     entity.take_damage(self.dsd.damage*self.dsd.crown_tower_damage_percent)
                 else:
                     entity.take_damage(self.dsd.damage)
@@ -449,13 +470,14 @@ class BattleState:
         if isinstance(entity, Building) or isinstance(entity, Projectile): return
 
         if not self.ground_walkable(entity.position, entity.data.collision_radius):
+
             x, y, r = entity.position.x, entity.position.y, entity.data.collision_radius
             push_ratio = 0.5
             if y < push_ratio*r: y=push_ratio*r
             elif y > 32-push_ratio*r: y=32-push_ratio*r
             if x < push_ratio*r: x=r
             elif x > 18-push_ratio*r: x=18-push_ratio*r
-            if 15-push_ratio*r < y < 17+push_ratio*r:
+            if 15-push_ratio*r < y < 17+push_ratio*r and not entity.data.is_air_unit:
                 y = 15-push_ratio*r if y-15 < 17-y else 17+push_ratio*r
             entity.position.x = x
             entity.position.y = y
@@ -463,6 +485,7 @@ class BattleState:
     def _spawn_entity(self, entity):
         self.ensure_walkability(entity)
         entity.battle_state = self
+        entity.id = self.next_entity_id
         self.entities[len(self.entities)+1] = entity
         self.next_entity_id += 1
 

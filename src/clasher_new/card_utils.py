@@ -75,7 +75,7 @@ class Card:
         self.jump_speed = self.data['summonCharacterData'].get('jumpSpeed', 0) / 60
 
         if self.name == 'King_PrincessTowers':
-            self.collision_radius = 1.25
+            self.collision_radius = 1.5
 
 class Projectile:
     def __init__(self, projectile_data):
