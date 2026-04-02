@@ -112,8 +112,8 @@ class Entity:
         if isinstance(e2, Entity):
             y = e2.position.y
         else: y = e2.y
-        if self.position.y < 15.0: return y > 17.0
-        else: return y < 15.0
+        if y < 15.0: return self.position.y > 17.0
+        else: return self.position.y < 15.0
 
     def near_river(self):
         return abs(self.position.y-15.0)<self.data.collision_radius or abs(self.position.y-17.0)<self.data.collision_radius
@@ -227,6 +227,7 @@ class Troop(Entity):
                                             self.near_river()):
                     pathfind_target = current_target.position
                     if not self.jumping_across_river:
+                        print('Start jumping!')
                         self.start_jumping_position = Position(self.position.x, self.position.y)
                         self.jumping_across_river = True
                         self.data.is_air_unit = True
