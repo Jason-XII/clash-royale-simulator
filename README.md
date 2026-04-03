@@ -56,6 +56,7 @@ What's NOT done:
 - SpearGoblins
 - GiantSkeleton
 - HogRider
+- MinionHorde
 
 ## Where is the code?
 

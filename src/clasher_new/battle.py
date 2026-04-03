@@ -22,6 +22,22 @@ class Entity:
             self.entity_holder = eval(f"{self.card_name}(self)")
         self.target_id = None
 
+    def to_dict(self):
+        return {
+            'type': 'entity',
+            'id': self.id,
+            'card_name': self.card_name,
+            'player': self.player,
+            'x': self.position.x,
+            'y': self.position.y,
+            'hp': self.hp,
+            'attack_cooldown': self.attack_cooldown,
+            'speed': self.speed,
+            'target_id': self.target_id,
+            'jumping_across_river': self.jumping_across_river,
+            'deploy_delay_remaining': getattr(self, 'deploy_delay_remaining', 0),
+        }
+
     def update(self, dt):
         self.entity_holder.on_tick(dt)
 
@@ -141,6 +157,12 @@ class Troop(Entity):
         self.jumping_across_river = False
         self.start_jumping_position = None
 
+    def to_dict(self):
+        d = super().to_dict()
+        d.update({'type': 'troop', 'path_blocked_counter': self.path_blocked_counter,
+                  'start_jumping_position': (self.start_jumping_position.x, self.start_jumping_position.y)
+                  if self.start_jumping_position else None})
+        return d
 
     def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
@@ -328,6 +350,12 @@ class Building(Entity):
         self.persistent = persistent
         self.name = self.data.name
 
+    def to_dict(self):
+        d = super().to_dict()
+        d.update({'type': 'building', 'lifetime_elapsed': self.lifetime_elapsed,
+                  'tower_active': self.tower_active, 'persistent': self.persistent})
+        return d
+
     def take_damage(self, amount: float):
         super().take_damage(amount)
         if self.data.name == 'KingTower' and not self.tower_active:
@@ -362,6 +390,13 @@ class Projectile(Entity):
         self.battle_state = None
         self.name = self.proj.name
         self.data.collision_radius = 0.3
+
+    def to_dict(self):
+        d = super().to_dict()
+        d.update({'type': 'projectile', 'homing': self.homing,
+                  'target_position': (self.target_position.x, self.target_position.y)
+                  if self.target_position else None})
+        return d
 
     def update(self, dt):
         """Update projectile - move towards target"""
@@ -495,7 +530,47 @@ class BattleState:
         else:
             self._spawn_entity(entity)
 
+    def update_player_hp(self):
+        p0, p1 = self.players
+        p0.king_tower_hp = self.entities[6].hp
+        p0.left_tower_hp = self.entities[3].hp
+        p0.right_tower_hp = self.entities[4].hp
+        p1.king_tower_hp = self.entities[5].hp
+        p1.left_tower_hp = self.entities[1].hp
+        p1.right_tower_hp = self.entities[2].hp
+
     def step(self, dt):
+        if self.game_over: return
+        self.update_player_hp()
+        p0 = self.players[0].get_crown_count()
+        p1 = self.players[1].get_crown_count()
+        p0h = self.players[0]
+        p1h = self.players[1]
+        if p0 == 3:
+            self.game_over = True
+            self.winner = 1
+            return
+        elif p1 == 3:
+            self.game_over = True
+            self.winner = 0
+            return
+        elif 300>self.time >= 180:
+            if p0 > p1:
+                self.game_over = True
+                self.winner = 1
+                return
+            elif p0 < p1:
+                self.game_over = True
+                self.winner = 0
+                return
+        elif self.time >= 300:
+            self.game_over = True
+            min_0_hp = min(each for each in (p0h.king_tower_hp, p0h.left_tower_hp, p0h.right_tower_hp) if each > 0)
+            min_1_hp = min(each for each in (p1h.king_tower_hp, p1h.left_tower_hp, p1h.right_tower_hp) if each > 0)
+            if min_0_hp > min_1_hp:
+                self.winner = 0
+            else:
+                self.winner = 1
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):

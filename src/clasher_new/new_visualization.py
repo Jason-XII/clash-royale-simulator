@@ -59,7 +59,10 @@ class Visualizer:
                     self.screen.blit(hp_txt, hp_txt.get_rect(center=(sx, sy)))
 
     def draw_ui(self):
-        txt = self.font.render(f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x", True, BLACK)
+        text = f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x"
+        if self.battle.game_over:
+            text += f"  Winner={'RED' if self.battle.winner == 1 else 'BLUE'}"
+        txt = self.font.render(text, True, BLACK)
         self.screen.blit(txt, (AX, AY+AH+10))
         if self.paused:
             p = self.font.render("PAUSED", True, RED)
@@ -92,11 +95,11 @@ class Visualizer:
         pygame.quit()
 
 player_0_deck = ['MinionHorde', 'Bomber']*4
-player_1_deck = ['Wizard', 'Knight']*4
+player_1_deck = ['Archer', 'Knight']*4
 if __name__ == "__main__":
     v = Visualizer()
     v.deploy('MinionHorde', (1.5, 13.5))
-    # v.deploy('Archer', (14.5, 29.5), player=1, delay=2)
+    v.deploy('Archer', (1.5, 29.5), player=1, delay=2)
     # v.deploy('Giant', (10.5, 6.5), delay=2)
-    # v.deploy('Wizard', (10.5, 17.5), player=1)
+    v.deploy('Knight', (2.5, 22.5), player=1)
     v.run()
