@@ -7,12 +7,13 @@ TICK_RATE = 60
 DT = 1.0 / TICK_RATE
 
 class GameServer:
-    def __init__(self, host='0.0.0.0', port=9999):
+    def __init__(self, host='10.235.130.132', port=9999):
         self.host, self.port = host, port
         self.clients = []      # list of (conn, player_id)
         self.inputs = [[], []] # pending inputs per player
         self.lock = threading.Lock()
         self.battle = None
+        self.decks = [None, None]
 
     def send(self, conn, msg):
         data = (json.dumps(msg) + '\n').encode()
@@ -30,11 +31,8 @@ class GameServer:
             'winner': self.battle.winner,
             'elixir': [p.elixir for p in self.battle.players],
             'entities': [
-                {'id': e.id, 'name': e.card_name, 'player': e.player,
-                 'x': e.position.x, 'y': e.position.y,
-                 'hp': e.hp, 'max_hp': e.data.hp, 'is_alive': e.is_alive,
-                 'is_building': isinstance(e, Building)}
-                for e in self.battle.entities.values()
+                e.to_dict()
+                for e in self.battle.entities.values() if e.is_alive
             ]
         }
 
@@ -46,9 +44,15 @@ class GameServer:
                 while '\n' in buf:
                     line, buf = buf.split('\n', 1)
                     msg = json.loads(line)
+                    if msg['type'] == 'deck':
+                        self.decks[player_id] = msg['cards']
+                        continue
                     with self.lock:
                         self.inputs[player_id].append(msg)
-            except: break
+            except socket.timeout:
+                continue
+            except:
+                break
 
     def run(self):
         # Wait for 2 players
@@ -58,6 +62,7 @@ class GameServer:
         print(f"Waiting for 2 players on {self.host}:{self.port}...")
         while len(self.clients) < 2:
             conn, addr = srv.accept()
+            conn.settimeout(0.01)
             pid = len(self.clients)
             self.clients.append((conn, pid))
             self.send(conn, {'type': 'hello', 'player_id': pid})
@@ -65,8 +70,14 @@ class GameServer:
             print(f"Player {pid} connected from {addr}")
 
         # Start game
-        deck = ['Knight', 'Archer'] * 4  # placeholder
-        self.battle = BattleState(PlayerState(0, deck, 5), PlayerState(1, deck, 5))
+        while not all(self.decks):
+            time.sleep(0.05)
+
+        self.battle = BattleState(
+            PlayerState(0, self.decks[0], 5),
+            PlayerState(1, self.decks[1], 5)
+        )
+        self.battle = BattleState(PlayerState(0, self.decks[0], 5), PlayerState(1, self.decks[1], 5))
         self.broadcast({'type': 'start'})
         print("Game started!")
 

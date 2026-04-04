@@ -31,11 +31,13 @@ class Entity:
             'x': self.position.x,
             'y': self.position.y,
             'hp': self.hp,
+            'max_hp': self.data.hp,
             'attack_cooldown': self.attack_cooldown,
             'speed': self.speed,
             'target_id': self.target_id,
             'jumping_across_river': self.jumping_across_river,
             'deploy_delay_remaining': getattr(self, 'deploy_delay_remaining', 0),
+            'collision_radius': self.data.collision_radius if not isinstance(self, Projectile) else 0.3
         }
 
     def update(self, dt):
@@ -83,7 +85,6 @@ class Entity:
         # if self.position.distance_to(new_target.position)-current_target.data.collision_radius < self.data.sight_range: return False
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
         if not new_target:
-            print('Switching target because of no target in sight.')
             return True
         if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius + self.data.collision_radius:
             return False
@@ -91,10 +92,8 @@ class Entity:
         is_current_building = isinstance(current_target, Building)
         is_new_troop = not isinstance(new_target, Building)
         if is_new_troop and is_current_building:
-            print('Found troop that takes higher priority')
             return True
         if self.position.distance_to(current_target.position) > self.position.distance_to(new_target.position):
-            print('Found nearer target that is not in attack range')
             return True
         return False
 
@@ -108,9 +107,6 @@ class Entity:
         else:
             current_target = self.battle_state.entities.get(self.target_id)
             if current_target.position.distance_to(self.position) - current_target.data.collision_radius - self.data.collision_radius > self.data.sight_range:
-                print(self.name, 'Lost target because out of sight range', current_target.position.distance_to(self.position),
-                      current_target.data.collision_radius, self.data.collision_radius)
-                print('Target is at', current_target.position.x, current_target.position.y, current_target.id)
                 current_target = None
                 self.target_id = None
         best_target = self.get_nearest_target()
@@ -121,12 +117,6 @@ class Entity:
         else:
             current_target = best_target
             self.target_id = current_target.id if current_target else None
-
-        if self.target_id and self.name == 'King_PrincessTowers':
-            print(self.name, 'Found target',
-                  current_target.position.distance_to(self.position),
-                  current_target.data.collision_radius, self.data.collision_radius)
-            print('Current target position is at', current_target.position.x, current_target.position.y, current_target.id )
         return current_target
 
     def create_projectile(self, target):
@@ -180,8 +170,6 @@ class Troop(Entity):
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
             # If direct path is blocked, try to find a way around
-            print('blocked, current position:', self.name, self.position.x, self.position.y)
-
             self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
@@ -270,7 +258,6 @@ class Troop(Entity):
                 else:
                     pathfind_target = self._get_pathfind_target(current_target)
                 if not self.jumping_across_river and has_jump_ability:
-                    print('Start jumping!')
                     self.start_jumping_position = Position(self.position.x, self.position.y)
                     self.jumping_across_river = True
                     self.data.is_air_unit = True
@@ -594,6 +581,7 @@ class BattleState:
         for p in positions:
             self.delayed_spawn(Troop(len(self.entities)+1, p, player_id, card_name), delayed_counter)
             delayed_counter += card_info.spawn_delay
+        self.players[player_id].play_card(card_name)
         return True
 
     def ground_walkable(self, position, mover_radius):
