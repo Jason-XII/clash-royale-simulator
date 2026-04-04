@@ -3,6 +3,7 @@ This project is still under active development.
 # Clash Royale Simulator 
 
 ![demo](./demo.gif)
+![demo2](./demo2.png) ![demo3](./demo3.png)
 
 ## How to play
 
