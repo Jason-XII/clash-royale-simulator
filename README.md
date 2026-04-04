@@ -4,8 +4,6 @@ This project is still under active development.
 
 ![demo](./demo.gif)
 
-<img src="demo2.gif" width="45%"> <img src="demo3.gif" width="45%">
-
 ## How to play
 
 Yes, this simulator is already playable! You need two computers that connect to the same local network. 
