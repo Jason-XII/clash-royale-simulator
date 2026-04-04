@@ -4,6 +4,12 @@ This project is still under active development.
 
 ![demo](./demo.gif)
 
+## Requirements
+
+```bash
+pip install pygame fastcore --user --no-cache-dir
+```
+
 ## How to play
 
 Yes, this simulator is already playable! You need two computers that connect to the same local network. 
