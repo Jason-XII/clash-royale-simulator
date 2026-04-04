@@ -57,6 +57,16 @@ What's NOT done:
 - GiantSkeleton
 - HogRider
 - MinionHorde
+- RoyalGiant
+- Princess
+- ThreeMusketeers (Not the newest version though)
+- BlowdartGoblin (Before nerf)
+- AngryBarbarians (English name: Elite Barbarians)
+- Bats
+- DartBarrell (English name: Flying Machine)
+- RoyalHogs
+- Cannon
+- Xbow
 
 ## Where is the code?
 

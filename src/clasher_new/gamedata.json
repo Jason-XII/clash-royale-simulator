@@ -1660,14 +1660,14 @@
             "source": "characters",
             "tidTarget": "TID_TARGETS_AIR_AND_GROUND",
             "tidSpeed": "TID_SPEED_3",
-            "projectileData": {
+            "customProjectileData": {
               "name": "PrincessProjectileDeco",
               "rarity": "Common",
               "speed": 600,
               "source": "projectiles",
               "tid": "TID_SPELL_ATTRIBUTE_RANGED_DAMAGE"
             },
-            "customFirstProjectileData": {
+            "projectileData": {
               "name": "PrincessProjectile",
               "rarity": "Common",
               "speed": 600,
