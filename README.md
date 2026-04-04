@@ -4,6 +4,20 @@ This project is still under active development.
 
 ![demo](./demo.gif)
 
+## How to play
+
+Yes, this simulator is already playable! You need two computers that connect to the same local network. 
+
+1. Run `ipconfig` on Windows or `ifconfig | grep inet` on macOS. Find your ip address in the local network. 
+If you are at home, the address should look like 192.168.xx.xx, if you are connected to a school network, 
+then that will probably start with a 10.xx.xx.xx.
+
+2. Modify the parameter in `server.py` in `src/clasher_new` and run it. Code files all live in this directory. 
+3. Send the `client_side` folder to another device and run the `client.py`. 
+4. Follow the instructions in the GUI and enter the server ip address after choosing your deck.
+5. When two clients are connected to the same server, the game starts automatically! 
+You can see elixir, drag and drop to deploy cards, see entities on the screen, etc.
+
 ## Why I created this repository
 I like clash royale and want to train a RL agent to play the game. 
 However, a simulator is needed to speed up training. I searched on GitHub and the only usable project I found
