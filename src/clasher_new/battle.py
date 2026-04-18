@@ -157,6 +157,7 @@ class Troop(Entity):
     def move_towards(self, position, dt: float) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
         distance = math.hypot(dx, dy)
+        if distance == 0: return
         move_distance = min(self.speed * dt, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
 
@@ -607,6 +608,7 @@ class BattleState:
                     overlap = e1.data.collision_radius + e2.data.collision_radius - e1.position.distance_to(e2.position)
                     # the direction vector points from e1 to e2
                     direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
+                    if abs(direction_vector) == 0: return
                     direction_vector /= abs(direction_vector)
                     movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
                     e2.position.x += direction_vector.real*movement_ratio*overlap
