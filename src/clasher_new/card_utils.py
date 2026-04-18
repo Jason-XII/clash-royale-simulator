@@ -65,6 +65,7 @@ class Card:
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData', {}))
         self.area_effect_data = AreaEffectData(self.data.get('areaEffectObjectData', {}))
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
+        self.shield_health = self.data['summonCharacterData'].get('shieldHitpoints', 0)
 
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
 

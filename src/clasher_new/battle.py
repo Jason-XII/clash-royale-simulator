@@ -28,6 +28,7 @@ class Entity:
         self.target_id = None
         self.battle_state = battle_state
         self.entity_holder.on_spawn()
+        self.shield_health = self.data.shield_health
 
     def to_dict(self):
         return {
@@ -60,7 +61,8 @@ class Entity:
 
     def take_damage(self, amount: float):
         """Apply damage to entity"""
-        self.hp -= amount
+        if not self.shield_health: self.hp -= amount
+        else: self.shield_health = max(0, self.shield_health - amount)
         if self.hp <= 0 and self.is_alive:
             self.is_alive = False
             self.entity_holder.on_death()
@@ -162,6 +164,7 @@ class Troop(Entity):
         self.jumping_across_river = False
         self.start_jumping_position = None
         self.spawned = False
+
 
     def to_dict(self):
         d = super().to_dict()

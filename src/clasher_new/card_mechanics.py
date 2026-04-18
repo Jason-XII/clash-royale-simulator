@@ -65,6 +65,9 @@ class Prince(BasicCharacter):
             self.entity.speed = self.entity.data.speed
         self.entity.attack_cooldown = self.entity.data.hit_speed
 
+class DarkPrince(Prince):
+    pass
+
 class GiantSkeleton(BasicCharacter):
     def __init__(self, entity):
         super().__init__(entity)

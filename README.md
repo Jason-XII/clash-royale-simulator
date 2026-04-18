@@ -87,6 +87,9 @@ What's NOT done:
 - RoyalHogs
 - Cannon
 - Xbow
+- IceWizard
+- SkeletonWarriors
+- DarkPrince
 
 ## Where is the code?
 

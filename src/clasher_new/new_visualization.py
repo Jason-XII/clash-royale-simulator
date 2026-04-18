@@ -53,7 +53,8 @@ class Visualizer:
             if e.hp > 0:
                 bw = max(r*2, 16)
                 pygame.draw.rect(self.screen, BLACK, (sx-bw//2-1, sy-r-12, bw+2, 5))
-                pygame.draw.rect(self.screen, GREEN, (sx-bw//2, sy-r-11, (e.hp/e.data.hp)*bw, 3))
+                hp_width = (e.hp/e.data.hp)*bw if not e.shield_health else (e.shield_health/e.data.shield_health)*bw
+                pygame.draw.rect(self.screen, GREEN, (sx-bw//2, sy-r-11, hp_width, 3))
                 if isinstance(e, Building):
                     hp_txt = self.font.render(str(int(e.hp)), True, WHITE)
                     self.screen.blit(hp_txt, hp_txt.get_rect(center=(sx, sy)))
@@ -95,11 +96,11 @@ class Visualizer:
         pygame.quit()
 
 player_0_deck = ['IceWizard', 'Bomber']*4
-player_1_deck = ['Musketeer', 'SkeletonArmy']*4
+player_1_deck = ['DarkPrince', 'Prince']*4
 if __name__ == "__main__":
     v = Visualizer()
     # v.deploy('IceWizard', (3.5, 13.5), delay=10)
-    # v.deploy('Musketeer', (2.5, 22.5), player=1, delay=2)
+    v.deploy('Prince', (18.5, 22.5), player=1)
     # v.deploy('Giant', (10.5, 6.5), delay=2)
-    v.deploy('Musketeer', (2.5, 22.5), player=1)
+    v.deploy('DarkPrince', (2.5, 22.5), player=1)
     v.run()
