@@ -49,7 +49,6 @@ class Prince(BasicCharacter):
         super().on_tick(dt)
         distance = self.entity.position.distance_to(self.starting_position)
         if distance > self.entity.data.charge_range and not self.charging:
-            print('Prince starts to charge at', self.entity.position.x, self.entity.position.y, distance, self.entity.data.charge_range)
             print(self.entity.name, self.entity.data.charge_range)
             self.charging = True
             self.entity.speed *= 2
@@ -61,7 +60,6 @@ class Prince(BasicCharacter):
             self.starting_position = Position(self.entity.position.x, self.entity.position.y)
         else:
             current_target.take_damage(self.entity.data.charge_damage)
-            print('Prince stopped charging at position', self.entity.position.x, self.entity.position.y)
             self.charging = False
             self.starting_position = Position(self.entity.position.x, self.entity.position.y)
             self.entity.speed = self.entity.data.speed
@@ -75,3 +73,14 @@ class GiantSkeleton(BasicCharacter):
         bomb = TimedExplosive(self.battle_state.next_entity_id, self.entity.position, self.entity.player,
                               self.entity.name)
         self.battle_state._spawn_entity(bomb)
+
+class IceWizard(BasicCharacter):
+    def on_spawn(self):
+        spawn_data = self.entity.data.spawn_data
+        for entity in self.entity.battle_state.entities.values():
+            if not entity.is_alive or entity.player == self.entity.player: continue
+            if not entity.position.distance_to(self.entity.position) < spawn_data['radius']/1000 + entity.data.collision_radius:
+                continue
+            entity.take_damage(spawn_data['damage'])
+            entity.speed_debuff = min(1 + spawn_data['buffData']['speedMultiplier'] / 100, entity.speed_debuff)
+            entity.debuff_time_remaining = spawn_data['buffTime']/1000

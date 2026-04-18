@@ -8,7 +8,7 @@ from itertools import combinations
 
 
 class Entity:
-    def __init__(self, id, position, player, card_name):
+    def __init__(self, id, position, player, card_name, battle_state=None):
         store_attr()
         self.data = Card(self.card_name)
         self.is_alive = True
@@ -18,9 +18,16 @@ class Entity:
         self.hp = self.data.hp
         self.entity_holder = BasicCharacter(self)
         self.jumping_across_river = False
-        if self.card_name in globals():
+        # This affects both speed and hit speed.
+        self.speed_buff = 1.0
+        self.speed_debuff = 1.0
+        self.buff_time_remaining = 0.0
+        self.debuff_time_remaining = 0.0
+        if self.card_name in globals() and not isinstance(self, Projectile):
             self.entity_holder = eval(f"{self.card_name}(self)")
         self.target_id = None
+        self.battle_state = battle_state
+        self.entity_holder.on_spawn()
 
     def to_dict(self):
         return {
@@ -42,6 +49,14 @@ class Entity:
 
     def update(self, dt):
         self.entity_holder.on_tick(dt)
+        if self.buff_time_remaining > 0:
+            self.buff_time_remaining -= dt
+        else:
+            self.speed_buff = 1.0
+        if self.debuff_time_remaining > 0:
+            self.debuff_time_remaining -= dt
+        else:
+            self.speed_debuff = 1.0
 
     def take_damage(self, amount: float):
         """Apply damage to entity"""
@@ -139,13 +154,14 @@ class Entity:
         return abs(self.position.y-15.0)<self.data.collision_radius or abs(self.position.y-17.0)<self.data.collision_radius
 
 class Troop(Entity):
-    def __init__(self, id, position, player, card_name):
-        super().__init__(id, position, player, card_name)
+    def __init__(self, id, position, player, card_name, battle_state=None):
+        super().__init__(id, position, player, card_name, battle_state)
         self.deploy_delay_remaining = self.data.deploy_time
         self.name = self.data.name
         self.path_blocked_counter = 0
         self.jumping_across_river = False
         self.start_jumping_position = None
+        self.spawned = False
 
     def to_dict(self):
         d = super().to_dict()
@@ -158,7 +174,7 @@ class Troop(Entity):
         dx, dy = position.x-self.position.x, position.y-self.position.y
         distance = math.hypot(dx, dy)
         if distance == 0: return
-        move_distance = min(self.speed * dt, distance)
+        move_distance = min(self.speed * dt * self.speed_buff * self.speed_debuff, distance)
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
 
         # Check if the new position would be walkable (for ground units)
@@ -264,13 +280,12 @@ class Troop(Entity):
                     self.data.is_air_unit = True
                     self.speed = self.data.jump_speed
                 self.move_towards(pathfind_target, dt)
-                self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt)
-                if self.jumping_across_river: self.attack_cooldown = 0
+                self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
             else:
                 if self.attack_cooldown <= 0:
                     self.entity_holder.on_attack(current_target)
                 else:
-                    self.attack_cooldown -= dt
+                    self.attack_cooldown -= dt*self.speed_buff*self.speed_debuff
         else:
             # now calculate:
             if self.data.is_air_unit:
@@ -359,14 +374,15 @@ class Building(Entity):
         if self.data.lifetime > 0 and not self.persistent:
             decay = (self.data.hp / float(self.data.lifetime)) * dt
             self.take_damage(decay)
-        if self.attack_cooldown > 0: self.attack_cooldown -= dt
+        if self.attack_cooldown > 0:
+            self.attack_cooldown = max(0, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         target = self.update_current_target()
         if target and self.attack_cooldown <= 0:
             if self.data.projectiles:
                 self.create_projectile(target)
             else:
                 target.take_damage(self.data.damage)
-            self.attack_cooldown = 1 / self.data.hit_speed
+            self.attack_cooldown = self.data.hit_speed
 
 class Projectile(Entity):
     def __init__(self, id, position, player, source_card_name, target, homing=True):
@@ -394,8 +410,13 @@ class Projectile(Entity):
         if distance <= self.proj.speed * dt:
             if not self.proj.radius:
                 self.target.take_damage(self.proj.damage)
+                if self.proj.buff_time:
+                    self.target.speed_debuff = min(1 + self.proj.target_buff['speedMultiplier'] / 100, self.target.speed_debuff)
+                    self.target.debuff_time_remaining = self.proj.buff_time
             else:
                 self._deal_splash_damage()
+            # Now handle target buff
+
             self.is_alive = False
         else:
             self._move_towards(target_position_final, dt)
@@ -410,6 +431,9 @@ class Projectile(Entity):
             # Use hitbox-based collision detection for more accurate splash damage
             if entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius):
                 entity.take_damage(self.proj.damage)
+                if self.proj.buff_time:
+                    entity.speed_debuff = min(1 + self.proj.target_buff['speedMultiplier'] / 100, entity.speed_debuff)
+                    entity.debuff_time_remaining = self.proj.buff_time
 
     def _move_towards(self, target_pos, dt):
         """Move towards target position"""
@@ -516,7 +540,7 @@ class BattleState:
         if delay:
             self.schedule.append((entity, self.time+delay))
         else:
-            self._spawn_entity(entity)
+            self._spawn_entity(Troop(*entity))
 
     def update_player_hp(self):
         p0, p1 = self.players
@@ -567,7 +591,7 @@ class BattleState:
         self.resolve_collisions()
 
         for entity, spawn_time in self.schedule:
-            if self.time > spawn_time: self._spawn_entity(entity)
+            if self.time > spawn_time: self._spawn_entity(Troop(*entity))
         self.schedule = [each for each in self.schedule if each[1] > self.time]
         self.time += dt
         self.tick += 1
@@ -580,7 +604,7 @@ class BattleState:
         positions = get_spawn_position(card_info, position, player_id)
         delayed_counter = card_info.spawn_delay
         for p in positions:
-            self.delayed_spawn(Troop(len(self.entities)+1, p, player_id, card_name), delayed_counter)
+            self.delayed_spawn((len(self.entities)+1, p, player_id, card_name, self), delayed_counter)
             delayed_counter += card_info.spawn_delay
         self.players[player_id].play_card(card_name)
         return True

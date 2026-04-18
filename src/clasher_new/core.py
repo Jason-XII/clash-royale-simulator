@@ -13,6 +13,7 @@ class BasicCharacter:
         self.entity = entity
         self.battle_state = self.entity.battle_state
         self.data = self.entity.data
+    def on_spawn(self): pass
     def on_tick(self, dt): self.battle_state = self.entity.battle_state
     def on_death(self): pass
     def on_attack(self, current_target=None):
