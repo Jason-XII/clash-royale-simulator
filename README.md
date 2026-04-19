@@ -90,6 +90,7 @@ What's NOT done:
 - IceWizard
 - SkeletonWarriors
 - DarkPrince
+- LavaHound
 
 ## Where is the code?
 
