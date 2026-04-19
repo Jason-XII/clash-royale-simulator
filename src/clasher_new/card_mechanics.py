@@ -43,7 +43,6 @@ class LavaHound(BasicCharacter):
         from battle import get_spawn_position, Troop
         self.battle_state = self.entity.battle_state
         positions = get_spawn_position(Card('LavaPups'), self.entity.position, self.entity.player)
-        print(len(positions))
         for position in positions:
             self.battle_state._spawn_entity(Troop(self.battle_state.next_entity_id, position, self.entity.player, 'LavaPups'))
 

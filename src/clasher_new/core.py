@@ -28,3 +28,5 @@ class BasicCharacter:
             # must have projectiles
             self.entity.create_projectile(current_target)
         self.entity.attack_cooldown = self.data.hit_speed
+        if self.entity.data.kamikaze:
+            self.entity.is_alive = False

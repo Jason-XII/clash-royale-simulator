@@ -91,6 +91,7 @@ What's NOT done:
 - SkeletonWarriors
 - DarkPrince
 - LavaHound
+- IceSpirits
 
 ## Where is the code?
 

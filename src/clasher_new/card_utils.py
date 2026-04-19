@@ -79,6 +79,7 @@ class Card:
         self.jump_speed = self.data['summonCharacterData'].get('jumpSpeed', 0) / 60
 
         self.spawn_data = self.data['summonCharacterData'].get("spawnAreaObjectData", {})
+        self.kamikaze = self.data['summonCharacterData'].get('kamikaze', False)
 
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.5
