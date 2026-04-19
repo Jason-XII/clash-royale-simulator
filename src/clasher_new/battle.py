@@ -16,6 +16,8 @@ class Entity:
         self.speed = self.data.speed
         self.battle_state = None
         self.hp = self.data.hp
+        self.targetable = True
+        self.invincible = False
         self.entity_holder = BasicCharacter(self)
         self.jumping_across_river = False
         # This affects both speed and hit speed.
@@ -29,6 +31,7 @@ class Entity:
         self.battle_state = battle_state
         self.entity_holder.on_spawn()
         self.shield_health = self.data.shield_health
+
 
     def to_dict(self):
         return {
@@ -61,6 +64,7 @@ class Entity:
 
     def take_damage(self, amount: float):
         """Apply damage to entity"""
+        if self.invincible: return
         if not self.shield_health: self.hp -= amount
         else: self.shield_health = max(0, self.shield_health - amount)
         if self.hp <= 0 and self.is_alive:
@@ -79,10 +83,12 @@ class Entity:
         for entity in list(self.battle_state.entities.values()):
             if type(entity).__name__ in {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect', 'TimedExplosive'} or \
                     not (entity.is_alive and entity.player != self.player): continue # exclude spells or stealth entities
+            if not entity.targetable: continue
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
             if distance-entity.data.collision_radius-self.data.collision_radius <= self.data.sight_range:
+                print('Targeting:', entity.name, entity.targetable)
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -254,6 +260,8 @@ class Troop(Entity):
 
     def update(self, dt):
         if not self.is_alive: return
+        if self.name == 'Miner':
+            super().update(dt)
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return # Haven't finished deploying yet
@@ -261,7 +269,9 @@ class Troop(Entity):
         # recommended target. If current target exists, compare that with the recommendation to see
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
         # be none.
-        super().update(dt)
+        if self.name != 'Miner':
+            super().update(dt)
+        # The miner needs to update before deployment.
         if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
             self.jumping_across_river = False
             self.data.is_air_unit = Card(self.name).is_air_unit

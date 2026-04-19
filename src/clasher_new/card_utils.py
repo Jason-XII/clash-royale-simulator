@@ -81,6 +81,8 @@ class Card:
         self.spawn_data = self.data['summonCharacterData'].get("spawnAreaObjectData", {})
         self.kamikaze = self.data['summonCharacterData'].get('kamikaze', False)
 
+        self.tower_damage_mult = 1+self.data['summonCharacterData'].get('crownTowerDamagePercent', 0)/100
+
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.5
 

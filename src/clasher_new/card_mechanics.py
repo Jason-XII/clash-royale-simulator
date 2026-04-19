@@ -1,5 +1,6 @@
 from core import BasicCharacter, Position
 from card_utils import Card
+from arena import TileGrid
 
 class Witch(BasicCharacter):
     def __init__(self, entity):
@@ -94,3 +95,20 @@ class IceWizard(BasicCharacter):
             entity.take_damage(spawn_data['damage'])
             entity.speed_debuff = min(1 + spawn_data['buffData']['speedMultiplier'] / 100, entity.speed_debuff)
             entity.debuff_time_remaining = spawn_data['buffTime']/1000
+
+class Miner(BasicCharacter):
+    def __init__(self, entity):
+        super().__init__(entity)
+        self.distance = self.entity.position.distance_to(TileGrid.RED_KING_TOWER if self.entity.player == 1 else TileGrid.BLUE_KING_TOWER)
+        self.freeze_time = self.distance/(650/60)
+        self.entity.targetable = False
+        self.entity.invincible = True
+        print(self.freeze_time)
+
+    def on_tick(self, dt):
+        if self.freeze_time > 0:
+            self.freeze_time -= dt
+            self.entity.deploy_delay_remaining = self.entity.data.deploy_time
+        else:
+            self.entity.targetable = True
+            self.entity.invincible = False

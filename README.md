@@ -45,11 +45,12 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - handling entity collision: done.
 - periodic spawning, death damage, death spawning
 - charging, jumping across rivers
+- special slow and freeze effects
 
-What's NOT done:
-- spawn and death effects
-- spells
-- evo, hero and champion card mechanics
+Caveats:
+- spells are mostly not implemented yet.
+- Miner's digging logic needs further refinement
+- evo, hero and champion card mechanics are not implemented
 - ...
 
 ### Characters implemented
@@ -92,6 +93,8 @@ What's NOT done:
 - DarkPrince
 - LavaHound
 - IceSpirits
+- FireSpirits
+- Miner
 
 ## Where is the code?
 

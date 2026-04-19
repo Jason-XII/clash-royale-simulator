@@ -95,12 +95,12 @@ class Visualizer:
             self.clock.tick(60)
         pygame.quit()
 
-player_0_deck = ['LavaHound', 'Bomber']*4
-player_1_deck = ['IceSpirits', 'Prince']*4
+player_0_deck = ['Miner', 'Bomber']*4
+player_1_deck = ['FireSpirits', 'Prince']*4
 if __name__ == "__main__":
     v = Visualizer()
-    v.deploy('LavaHound', (3.5, 13.5))
+    v.deploy('Miner', (3.5, 23.5))
     # v.deploy('Prince', (18.5, 22.5), player=1)
     # v.deploy('Giant', (10.5, 6.5), delay=2)
-    v.deploy('IceSpirits', (2.5, 22.5), player=1)
+    # v.deploy('FireSpirits', (2.5, 22.5), player=1)
     v.run()
