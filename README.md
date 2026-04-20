@@ -95,6 +95,8 @@ Caveats:
 - IceSpirits
 - FireSpirits
 - Miner
+- Sparky
+- Bowler
 
 ## Where is the code?
 

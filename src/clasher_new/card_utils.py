@@ -96,8 +96,9 @@ class Projectile:
         self.buff_time = self.data.get('buffTime', 0) / 1000
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')
         self.hits_ground = 'GROUND' in self.data.get('tidTarget', '') or 'BUILDING' in self.data.get('tidTarget', '')
-        self.pushback = self.data.get('pushback', 0)
+        self.pushback = self.data.get('pushback', 0) / 1000
         self.name = self.data.get('name', 'Unknown')
+        self.roll_range = self.data.get('projectileRange', 0) / 1000
         if self.data.get('name') == 'TowerPrincessProjectile':
             self.hits_air = True
             self.hits_ground = True

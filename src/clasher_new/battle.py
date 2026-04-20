@@ -88,7 +88,6 @@ class Entity:
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
             if distance-entity.data.collision_radius-self.data.collision_radius <= self.data.sight_range:
-                print('Targeting:', entity.name, entity.targetable)
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -401,12 +400,16 @@ class Projectile(Entity):
     def __init__(self, id, position, player, source_card_name, target, homing=True):
         super().__init__(id, position, player, source_card_name)
         self.target_position = Position(target.position.x, target.position.y)
+        self.initial_position = Position(self.position.x, self.position.y)
         self.proj = self.data.projectile_data # a shortcut
+        self.rolling = bool(self.proj.pushback)
         self.homing = homing
         self.target = target
         self.battle_state = None
         self.name = self.proj.name
         self.data.collision_radius = 0.3
+
+        self.damage_dealt = []
 
     def to_dict(self):
         d = super().to_dict()
@@ -418,6 +421,38 @@ class Projectile(Entity):
     def update(self, dt):
         """Update projectile - move towards target"""
         if not self.is_alive: return
+        if self.rolling:
+            distance = self.position.distance_to(self.initial_position)
+            if distance > self.proj.roll_range:
+                self.is_alive = False
+                return
+            # now deal area damage
+            for each in self.battle_state.entities.values():
+                if type(each).__name__ in {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect',
+                                              'TimedExplosive'}: continue  # exclude spells or stealth entities
+                if each in self.damage_dealt or each.data.is_air_unit: continue
+                if not each.is_alive or each.player == self.player: continue
+                if each.position.distance_to(self.position) < each.data.collision_radius + self.proj.radius:
+                    print('Dealing damage to', each.name)
+                    each.take_damage(self.proj.damage)
+                    self.damage_dealt.append(each)
+                    # now knockback
+                    direction_vector = complex(each.position.x-self.position.x, each.position.y-self.position.y)
+                    direction_vector /= abs(direction_vector)
+                    direction_vector *= self.proj.pushback
+                    if isinstance(each, Troop):
+                        new_x = each.position.x + direction_vector.real
+                        new_y = each.position.y + direction_vector.imag
+                        if self.battle_state.ground_walkable(Position(new_x, new_y), each.data.collision_radius):
+                            each.position = Position(new_x, new_y)
+            direction_vector = complex(self.target_position.x-self.initial_position.x,
+                                       self.target_position.y-self.initial_position.y)
+            direction_vector /= abs(direction_vector)
+            direction_vector *= self.proj.speed * dt
+            self.position.x += direction_vector.real
+            self.position.y += direction_vector.imag
+            return
+
         target_position_final = self.target_position if not self.homing else self.target.position
         distance = self.position.distance_to(target_position_final)
         if distance <= self.proj.speed * dt:
