@@ -98,6 +98,7 @@ Caveats:
 - Sparky
 - Bowler
 - Rage
+- RageBarbarian (English name: Lumberjack)
 
 ## Where is the code?
 

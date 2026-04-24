@@ -155,3 +155,8 @@ class Rage(BasicCharacter):
             pass
         else:
             self.attack_cooldown -= dt
+
+class RageBarbarian(BasicCharacter):
+    def on_death(self):
+        from battle import Entity
+        self.battle_state._spawn_entity(Entity(self.battle_state.next_entity_id, self.entity.position, self.entity.player, "Rage", self.battle_state))
