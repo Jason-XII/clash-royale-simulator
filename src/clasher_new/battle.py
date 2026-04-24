@@ -1,7 +1,7 @@
 from arena import TileGrid
 from player import PlayerState
 from card_mechanics import *
-from card_utils import Card, TimedExplosiveData
+from card_utils import Card, TimedExplosiveData, spells, buildings
 from fastcore.all import store_attr
 import math
 from itertools import combinations
@@ -11,10 +11,12 @@ class Entity:
     def __init__(self, id, position, player, card_name, battle_state=None):
         store_attr()
         self.data = Card(self.card_name)
+        self.name = self.data.name
+        self.battle_state = battle_state
         self.is_alive = True
         self.attack_cooldown = self.data.load_time
         self.speed = self.data.speed
-        self.battle_state = None
+        self.battle_state = battle_state
         self.hp = self.data.hp
         self.targetable = True
         self.invincible = False
@@ -28,7 +30,7 @@ class Entity:
         if self.card_name in globals() and not isinstance(self, Projectile):
             self.entity_holder = eval(f"{self.card_name}(self)")
         self.target_id = None
-        self.battle_state = battle_state
+
         self.entity_holder.on_spawn()
         self.shield_health = self.data.shield_health
 
@@ -159,6 +161,7 @@ class Entity:
 
     def near_river(self):
         return abs(self.position.y-15.0)<self.data.collision_radius or abs(self.position.y-17.0)<self.data.collision_radius
+
 
 class Troop(Entity):
     def __init__(self, id, position, player, card_name, battle_state=None):
@@ -383,8 +386,10 @@ class Building(Entity):
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return
+        super().update(dt)
         if self.data.lifetime > 0 and not self.persistent:
             decay = (self.data.hp / float(self.data.lifetime)) * dt
+            self.take_damage(decay)
             self.take_damage(decay)
         if self.attack_cooldown > 0:
             self.attack_cooldown = max(0, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
@@ -492,14 +497,6 @@ class Projectile(Entity):
         self.position.y += step.imag
 
 
-class AreaEffect(Entity):
-    def __init__(self, id, position, player, source_card_name, battle_state):
-        super().__init__(id, position, player, source_card_name, battle_state)
-        if source_card_name == 'RageBarbarian':
-            self.area_effect_data =
-
-
-
 class TimedExplosive(Entity):
     def __init__(self, id, position, player, card_name):
         super().__init__(id, position, player, card_name)
@@ -592,11 +589,21 @@ class BattleState:
         self.entities[len(self.entities)+1] = entity
         self.next_entity_id += 1
 
+    def _wrap(self, entity_data):
+        card_name = entity_data[3]
+        if card_name in spells:
+            print("Deploying spell, ", card_name, *entity_data)
+            return Entity(*entity_data)
+        elif card_name in buildings:
+            return Building(*entity_data)
+        else:
+            return Troop(*entity_data)
+
     def delayed_spawn(self, entity, delay):
         if delay:
             self.schedule.append((entity, self.time+delay))
         else:
-            self._spawn_entity(Troop(*entity))
+            self._spawn_entity(self._wrap(entity))
 
     def update_player_hp(self):
         p0, p1 = self.players
@@ -647,7 +654,7 @@ class BattleState:
         self.resolve_collisions()
 
         for entity, spawn_time in self.schedule:
-            if self.time > spawn_time: self._spawn_entity(Troop(*entity))
+            if self.time > spawn_time: self._spawn_entity(self._wrap(entity))
         self.schedule = [each for each in self.schedule if each[1] > self.time]
         self.time += dt
         self.tick += 1
@@ -704,14 +711,16 @@ class BattleState:
                     each.tower_active = True
                     break
 
-    def deal_area_damage(self, from_player, position, range, amount, attack_air, attack_ground):
+    def deal_area_damage(self, from_player, position, range, amount, attack_air, attack_ground, crown_tower_damage_percent=1.0):
         for entity in self.entities.values():
             if not entity.is_alive or entity.player == from_player: continue
+            if entity.invincible: continue
+            amount_dealt = amount if "King" not in entity.name else amount*crown_tower_damage_percent
             if attack_air and entity.data.is_air_unit:
                 if entity.position.distance_to(position) < range:
-                    entity.take_damage(amount)
+                    entity.take_damage(amount_dealt)
             elif attack_ground and not entity.data.is_air_unit:
                 if entity.position.distance_to(position) < range:
-                    entity.take_damage(amount)
+                    entity.take_damage(amount_dealt)
 
 

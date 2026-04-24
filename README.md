@@ -97,6 +97,7 @@ Caveats:
 - Miner
 - Sparky
 - Bowler
+- Rage
 
 ## Where is the code?
 

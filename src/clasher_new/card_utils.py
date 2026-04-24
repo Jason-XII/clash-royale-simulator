@@ -6,8 +6,14 @@ with open('gamedata.json') as f:
 
 with open('cards_stats_characters.json') as f:
     extra = json.load(f)
+    air_units = [each['name'] for each in extra if each['flying_height'] != 0]
+with open('cards_stats_spell.json') as f:
+    extra = json.load(f)
+    spells = [each['name'] for each in extra]
+with open('cards_stats_building.json') as f:
+    extra = json.load(f)
+    buildings = [each['name'] for each in extra]
 
-air_units = [each['name'] for each in extra if each['flying_height'] != 0]
 data = data['items']['spells']
 card_data = {each['name']: each for each in data}
 
@@ -42,7 +48,7 @@ card_data['King_PrincessTowers']['summonCharacterData'] = card_data['King_Prince
 class Card:
     def __init__(self, card_name):
         self.data = card_data[card_name]
-        self.hp = self.data['summonCharacterData']['hitpoints']
+        self.hp = self.data['summonCharacterData'].get('hitpoints', 0)
         self.elixir = self.data.get('manaCost') # princess towers don't have elixir cost
         self.name = self.data['name']
         self.damage = self.data['summonCharacterData'].get('damage', 0)
@@ -53,26 +59,26 @@ class Card:
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1000) / 1000
-        self.hit_speed = self.data['summonCharacterData'].get('hitSpeed') / 1000
+        self.hit_speed = self.data['summonCharacterData'].get('hitSpeed', 0) / 1000
         self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
         self.speed = self.data['summonCharacterData'].get('speed', 0)/60
-        self.target_only_buildings = self.data['summonCharacterData']['tidTarget'] == "TID_TARGETS_BUILDINGS"
+        self.target_only_buildings = self.data['summonCharacterData'].get('tidTarget', '') == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units or self.data['summonCharacterData'].get('name', '') in air_units
         self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
-        self.attack_ground = ('GROUND' in self.data['summonCharacterData']['tidTarget']) or self.target_only_buildings
-        self.range = self.data['summonCharacterData']['range'] / 1000
-        self.sight_range = self.data['summonCharacterData']['sightRange'] / 1000
+        self.attack_ground = ('GROUND' in self.data['summonCharacterData'].get('tidTarget', '')) or self.target_only_buildings
+        self.range = self.data['summonCharacterData'].get('range', 0) / 1000
+        self.sight_range = self.data['summonCharacterData'].get('sightRange', 0) / 1000
         self.deploy_time = self.data['summonCharacterData'].get('deployTime', 0) / 1000
         self.charge_range = self.data['summonCharacterData'].get('chargeRange', 0) / 1000
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData', {}))
-        self.area_effect_data = AreaEffectData(self.data.get('areaEffectObjectData', {}))
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
         self.shield_health = self.data['summonCharacterData'].get('shieldHitpoints', 0)
 
         self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
 
         self.death_spawn_data = self.data['summonCharacterData'].get('deathSpawnCharacterData', {})
+        self.death_area_effect = self.data['summonCharacterData'].get('deathAreaEffectData', {})
         self.death_damage = self.data['summonCharacterData'].get('deathDamage', 0)
 
         self.jump_height = self.data['summonCharacterData'].get('jumpHeight', 0)
@@ -126,4 +132,5 @@ class AreaEffectData:
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':
-    print(Card('LavaPups').spawn_number)
+    print(spells)
+    print(buildings)
