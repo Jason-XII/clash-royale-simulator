@@ -114,11 +114,15 @@ class TimedExplosiveData:
         self.crown_tower_damage_percent = self.data.get('crownTowerDamagePercent', 100) / 100
 
 class AreaEffectData:
-    def __init__(self, area_effect_data):
-        self.data = area_effect_data
+    def __init__(self, source_card_name):
+        # This only works for lumberjack, will modify later.
+        self.data = Card(source_card_name)['summonCharacterData'].get('deathSpawnCharacterData', {}).get('deathAreaEffectData', {})
         self.duration = self.data.get('lifeDuration', 0) / 1000
+        self.radius = self.data.get('radius', 0) / 1000
+        self.buff_time = self.data.get('buffTime', 0)
         self.buff_data = self.data.get('buffData', {})
         self.speed_multiplier = self.buff_data.get('speedMultiplier')
+        self.damage = self.data.get('spawnAreaEffectObjectData', {}).get('damage', 0)
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':

@@ -492,6 +492,14 @@ class Projectile(Entity):
         self.position.y += step.imag
 
 
+class AreaEffect(Entity):
+    def __init__(self, id, position, player, source_card_name, battle_state):
+        super().__init__(id, position, player, source_card_name, battle_state)
+        if source_card_name == 'RageBarbarian':
+            self.area_effect_data =
+
+
+
 class TimedExplosive(Entity):
     def __init__(self, id, position, player, card_name):
         super().__init__(id, position, player, card_name)
