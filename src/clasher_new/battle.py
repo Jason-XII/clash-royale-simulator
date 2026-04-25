@@ -6,7 +6,7 @@ from itertools import combinations
 
 
 class Entity:
-    def __init__(self, id, position, player, card_name, battle_state=None):
+    def __init__(self, id, position, player, card_name, battle_state: "BattleState" = None):
         # Stores permanent information about this entity like `player` and `card_name`.
         self.id, self.position, self.player, self.card_name, self.battle_state = (id, position, player, card_name, battle_state)
         self.data = Card(self.card_name)
@@ -46,24 +46,31 @@ class Entity:
         self.entity_holder.on_spawn()
 
     def to_dict(self):
+        """If I want to render a certain entity on the screen, what's the minimal information I'll need?"""
         return {
             'type': 'entity',
-            'id': self.id,
             'card_name': self.card_name,
             'player': self.player,
             'x': self.position.x,
             'y': self.position.y,
             'hp': self.hp,
             'max_hp': self.data.hp,
-            'attack_cooldown': self.attack_cooldown,
-            'speed': self.speed,
-            'target_id': self.target_id,
-            'jumping_across_river': self.jumping_across_river,
             'deploy_delay_remaining': getattr(self, 'deploy_delay_remaining', 0),
             'collision_radius': self.data.collision_radius if not isinstance(self, Projectile) else 0.3
         }
 
+    def die(self):
+        """Automatically call entity holder's on_death to prevent bugs"""
+        self.is_alive = False
+        self.entity_holder.on_death()
+
     def update(self, dt):
+        # This part may be a bit confusing because it doesn't check the `is_alive` and `deploy_delay_remaining` attribute.
+        # Reasons: this will be eventually called by `super()` and won't terminate the actual update function. And
+        # there are miner and drill that needs to be moving before it's even deployed. So this function only updates the buff_time
+        # and debuff_time attribute.
+
+        # I assume this function will be called after the deployment and alive check.
         self.entity_holder.on_tick(dt)
         if self.buff_time_remaining > 0:
             self.buff_time_remaining -= dt
@@ -79,14 +86,15 @@ class Entity:
         if self.invincible: return
         if not self.shield_health: self.hp -= amount
         else: self.shield_health = max(0, self.shield_health - amount)
+
         if self.hp <= 0 and self.is_alive:
-            self.is_alive = False
-            self.entity_holder.on_death()
+            self.die()
             if self.data.death_damage:
-                for entity in self.battle_state.entities.values():
-                    if not entity.is_alive or entity.player == self.player: continue
-                    if entity.position.distance_to(self.position) - entity.data.collision_radius < 1:
-                        entity.take_damage(self.data.death_damage)
+                # I assume that all death damage deals attack to both air and ground troops.
+                # The game data file hasn't specified what's the radius of the death damage,
+                # so here I just set it to 1 tile
+                self.battle_state.deal_area_damage(self.player, self.position, 1.0+self.data.collision_radius, self.data.death_damage,
+                                                   attack_air=True, attack_ground=True)
 
     def get_nearest_target(self):
         """Find nearest valid target with priority rules"""
