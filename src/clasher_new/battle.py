@@ -1,39 +1,49 @@
-from arena import TileGrid
 from player import PlayerState
 from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
-from fastcore.all import store_attr
 import math
 from itertools import combinations
 
 
 class Entity:
     def __init__(self, id, position, player, card_name, battle_state=None):
-        store_attr()
+        # Stores permanent information about this entity like `player` and `card_name`.
+        self.id, self.position, self.player, self.card_name, self.battle_state = (id, position, player, card_name, battle_state)
         self.data = Card(self.card_name)
         self.name = self.data.name
-        self.battle_state = battle_state
+
+        # Stores state information that is likely to change.
         self.is_alive = True
         self.attack_cooldown = self.data.load_time
         self.speed = self.data.speed
-        self.battle_state = battle_state
         self.hp = self.data.hp
+        self.shield_health = self.data.shield_health
+        self.target_id = None
+
+        # Why use both targetable and invincible? Because some entities like the royal ghost/archer queen can be invisible but
+        # still takes damage. Other entities like the bandit/boss bandit/golden knight/miner(underground) can not be hit in a
+        # certain state.
         self.targetable = True
         self.invincible = False
-        self.entity_holder = BasicCharacter(self)
+
+        # There are a lot of entities that can jump across the arena's river, and the movement pattern is
+        # significantly different, so I dedicated a special variable to store this information.
         self.jumping_across_river = False
-        # This affects both speed and hit speed.
+
+        # This affects both speed and hit speed. I will rewrite this when poison comes out.
         self.speed_buff = 1.0
         self.speed_debuff = 1.0
         self.buff_time_remaining = 0.0
         self.debuff_time_remaining = 0.0
+
+        # This part is where flexibility comes in - some cards have special mechanics that can't be handled in
+        # the entity/troop/buildings classes. So I created `BasicCharacter` to delegate most of the logic.
+        # If a card doesn't have special logic like the knight and mini-pekka, then only `BasicCharacter` will be
+        # used.
+        self.entity_holder = BasicCharacter(self)
         if self.card_name in globals() and not isinstance(self, Projectile):
             self.entity_holder = eval(f"{self.card_name}(self)")
-        self.target_id = None
-
         self.entity_holder.on_spawn()
-        self.shield_health = self.data.shield_health
-
 
     def to_dict(self):
         return {
