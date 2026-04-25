@@ -99,6 +99,7 @@ Caveats:
 - Bowler
 - Rage
 - RageBarbarian (English name: Lumberjack)
+- BattleRam
 
 ## Where is the code?
 

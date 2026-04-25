@@ -48,6 +48,7 @@ class LavaHound(BasicCharacter):
             self.battle_state._spawn_entity(Troop(self.battle_state.next_entity_id, position, self.entity.player, 'LavaPups'))
 
 class Prince(BasicCharacter):
+    """Implements charging abilities."""
     def __init__(self, entity):
         super().__init__(entity)
         self.starting_position = Position(self.entity.position.x, self.entity.position.y)
@@ -72,9 +73,21 @@ class Prince(BasicCharacter):
             self.starting_position = Position(self.entity.position.x, self.entity.position.y)
             self.entity.speed = self.entity.data.speed
         self.entity.attack_cooldown = self.entity.data.hit_speed
+        if self.entity.data.kamikaze:
+            self.entity.is_alive = False
+            self.on_death()
 
 class DarkPrince(Prince):
     pass
+
+class BattleRam(Prince):
+    def on_death(self):
+        print('Activates deathspawn')
+        from battle import get_spawn_position, Troop
+        positions = get_spawn_position(Card('Barbarian'), self.entity.position, self.entity.player)
+        for position in positions:
+            self.battle_state._spawn_entity(Troop(self.battle_state.next_entity_id, position, self.entity.player, 'Barbarian'))
+
 
 class GiantSkeleton(BasicCharacter):
     def __init__(self, entity):

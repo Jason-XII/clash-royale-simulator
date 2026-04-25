@@ -347,7 +347,7 @@ class Troop(Entity):
             else:
                 self.move_towards(self._get_basic_pathfind_target(), dt)
                 return
-            distance = dt * self.data.speed
+            distance = dt * self.speed
             dx = (dx/math.hypot(dx, dy))*distance
             dy = (dy/math.hypot(dx, dy))*distance
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)

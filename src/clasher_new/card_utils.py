@@ -20,7 +20,9 @@ card_data = {each['name']: each for each in data}
 card_data['Golemite'] = {'name': 'Golemite', 'summonCharacterData':card_data['Golem']['summonCharacterData']['deathSpawnCharacterData']}
 
 lava_pups = card_data['LavaHound']['summonCharacterData']['deathSpawnCharacterData']
+barbarian = card_data['BattleRam']['summonCharacterData']['deathSpawnCharacterData']
 card_data['LavaPups'] = {'name': 'LavaPups', 'summonCharacterData':lava_pups} | lava_pups
+card_data['Barbarian'] = {'name': 'Barbarian', 'summonCharacterData': barbarian} | barbarian
 
 # The king tower is not defined in `gamedata.json`, have to hard code it here.
 king_tower_stats = {
@@ -132,5 +134,4 @@ class AreaEffectData:
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':
-    print(spells)
-    print(buildings)
+    print(Card('Barbarian'))
