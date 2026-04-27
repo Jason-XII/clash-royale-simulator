@@ -64,11 +64,6 @@ class TileGrid:
                 return entity.is_alive
         return False  # Tower not found, assume dead
 
-    def _is_rolling_projectile_spell(self, spell_obj):
-        """Check if spell is a rolling projectile that requires territory validation"""
-        from .spells import RollingProjectileSpell
-        return isinstance(spell_obj, RollingProjectileSpell)
-
     def is_tower_tile(self, pos: Position, battle_state=None) -> bool:
         """Check if position overlaps with any living tower's occupied area"""
         for tower_pos, radius, player_id in self.towers:

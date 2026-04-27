@@ -101,12 +101,14 @@ class Entity:
         building_targets = []
         troop_targets = []
         for entity in list(self.battle_state.entities.values()):
-            if type(entity).__name__ in {'Projectile', 'SpawnProjectile', 'RollingProjectile', 'AreaEffect', 'TimedExplosive'} or \
-                    not (entity.is_alive and entity.player != self.player): continue # exclude spells or stealth entities
+            if (not isinstance(entity, Troop) or not isinstance(entity, Building)) or \
+                    not (entity.is_alive and entity.player != self.player): continue
             if not entity.targetable: continue
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
+
+            # Might change later: how to determine a target is in sight range, given the collision radius?
             if distance-entity.data.collision_radius-self.data.collision_radius <= self.data.sight_range:
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
