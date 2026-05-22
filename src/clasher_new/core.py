@@ -8,6 +8,11 @@ class Position:
     def distance_to(self, other):
         return math.hypot(self.x-other.x, self.y-other.y)
 
+class BlankEntity:
+    """A placeholder that only encodes the position value."""
+    def __init__(self, position):
+        self.position = position
+
 class BasicCharacter:
     def __init__(self, entity):
         self.entity = entity

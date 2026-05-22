@@ -76,8 +76,12 @@ class Card:
         self.sight_range = self.data['summonCharacterData'].get('sightRange', 0) / 1000
         self.deploy_time = self.data['summonCharacterData'].get('deployTime', 0) / 1000
         self.charge_range = self.data['summonCharacterData'].get('chargeRange', 0) / 1000
+
         self.projectiles = 'projectileData' in self.data['summonCharacterData']
         self.projectile_data = Projectile(self.data['summonCharacterData'].get('projectileData', {}))
+        self.projectile_waves = self.data.get('projectileWaves', 1)
+        self.wave_interval = self.data.get("projectileWaveInterval", 0) / 1000
+
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
         self.shield_health = self.data['summonCharacterData'].get('shieldHitpoints', 0)
 
@@ -127,7 +131,7 @@ class Projectile:
         self.data = projectile_data
         self.damage = self.data.get('damage')
         self.speed = self.data.get('speed', 0) / 60
-        self.radius = self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0) / 1000
+        self.radius = (self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0)) / 1000
         self.target_buff = self.data.get('targetBuffData', {})
         self.buff_time = self.data.get('buffTime', 0) / 1000
         self.hits_air = 'AIR' in self.data.get('tidTarget', '')

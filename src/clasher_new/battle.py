@@ -1,3 +1,4 @@
+from core import BlankEntity
 from player import PlayerState
 from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
@@ -422,19 +423,23 @@ class Building(Entity):
             self.attack_cooldown = self.data.hit_speed
 
 class Projectile(Entity):
-    def __init__(self, id, position, player, source_card_name, target, homing=True):
+    def __init__(self, id, position, player, source_card_name, target, homing=True, battle_state=None):
         super().__init__(id, position, player, source_card_name)
         self.target_position = Position(target.position.x, target.position.y)
         self.initial_position = Position(self.position.x, self.position.y)
         self.proj = self.data.projectile_data # a shortcut
-        self.rolling = bool(self.proj.pushback)
+        self.rolling = bool(self.proj.roll_range)
         self.homing = homing
         self.target = target
-        self.battle_state = None
+        self.battle_state = battle_state
         self.name = self.proj.name
-        self.data.collision_radius = 0.3
+        if self.data.type == 'spell':
+            self.data.collision_radius = self.proj.radius
+        else: self.data.collision_radius = 0.3
 
         self.damage_dealt = []
+
+        print('Projectile created:', source_card_name)
 
     def to_dict(self):
         d = super().to_dict()
@@ -479,6 +484,7 @@ class Projectile(Entity):
             return
 
         target_position_final = self.target_position if not self.homing else self.target.position
+        print(target_position_final.x, target_position_final.y, self.position.x, self.position.y)
         distance = self.position.distance_to(target_position_final)
         if distance <= self.proj.speed * dt:
             if not self.proj.radius:
@@ -604,6 +610,7 @@ class BattleState:
 
     def _spawn_entity(self, entity):
         self.ensure_walkability(entity)
+        print('Spawning entity, ', entity)
         entity.battle_state = self
         entity.id = self.next_entity_id
         self.entities[len(self.entities)+1] = entity
@@ -611,6 +618,8 @@ class BattleState:
 
     def _wrap(self, entity_data):
         card_name = entity_data[3]
+        if len(entity_data) == 7:
+            return Projectile(*entity_data)
         if card_name in spells:
             print("Deploying spell, ", card_name, *entity_data)
             return Entity(*entity_data)
@@ -669,6 +678,7 @@ class BattleState:
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):
+            print(entity.name, entity.is_alive)
             entity.update(dt)
             self.ensure_walkability(entity)
         self.resolve_collisions()
@@ -683,9 +693,19 @@ class BattleState:
         if not self.players[player_id].can_play_card(card_name):
             return False
         card_info = Card(card_name)
+        if card_info.type == 'spell' and card_info.projectiles:
+            initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
+            initial_position = Position(initial_position.x, initial_position.y)
+            target = BlankEntity(position)
+            delayed_counter = 0
+            for wave in range(card_info.projectile_waves):
+                print('creating delayed spawn at', initial_position.x, initial_position.y)
+                self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
+                delayed_counter += card_info.wave_interval
+            return
 
         positions = get_spawn_position(card_info, position, player_id)
-        delayed_counter = card_info.spawn_delay
+        delayed_counter = 0
         for p in positions:
             self.delayed_spawn((len(self.entities)+1, p, player_id, card_name, self), delayed_counter)
             delayed_counter += card_info.spawn_delay
