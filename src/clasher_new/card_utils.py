@@ -30,7 +30,9 @@ card_data['Barbarian'] = {'name': 'Barbarian', 'summonCharacterData': barbarian}
 # The king tower is not defined in `gamedata.json`, have to hard code it here.
 king_tower_stats = {
     'name': 'KingTower',
+    'tidType': 'TID_TYPE_TOWER_TROOP',
     'summonCharacterData': {
+        'name': 'KingTower',
         'hitpoints': 2100,
         'hitSpeed': 1000,
         'damage': 109,
@@ -41,7 +43,7 @@ king_tower_stats = {
         'deployTime': 3300,
         'loadTime': 700,
         'projectileData': {
-            'name': 'KingTowerCannonBall',
+            'name': 'KingProjectile',
             'speed': 600,
             'damage': 109,
         }
@@ -105,6 +107,8 @@ class Card:
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.5
 
+        self.set_level(11)
+
     def set_level(self, level):
         if self.rarity == 'Common': level_index = level - 1
         elif self.rarity == 'Rare': level_index = level - 3
@@ -115,6 +119,10 @@ class Card:
         if self.projectiles:
             projectile_name = self.data['summonCharacterData']['projectileData']['name']
             self.projectile_data.damage = projectiles[projectile_name]['damage_per_level'][level_index]
+
+        if self.type == 'troop':
+            building_name = self.data['summonCharacterData']['name']
+            self.hp = buildings[building_name]["hitpoints_per_level"][level_index]
 
         if self.type == 'character':
             character_name = self.data['summonCharacterData']['name']
@@ -139,6 +147,7 @@ class Projectile:
         self.pushback = self.data.get('pushback', 0) / 1000
         self.name = self.data.get('name', 'Unknown')
         self.roll_range = self.data.get('projectileRange', 0) / 1000
+        self.crown_tower_percent = (self.data.get("crownTowerDamagePercent", 0) + 100)/100
         if self.data.get('name') == 'TowerPrincessProjectile':
             self.hits_air = True
             self.hits_ground = True
@@ -166,6 +175,4 @@ class AreaEffectData:
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':
-    deck = ['Archer', 'Giant', 'Musketeer', 'MiniPekka', 'Fireball', 'Arrows', 'Minions', 'Knight']
-    for each in deck:
-        Card(each).set_level(11)
+    print(Card('Arrows').projectile_waves)

@@ -439,8 +439,6 @@ class Projectile(Entity):
 
         self.damage_dealt = []
 
-        print('Projectile created:', source_card_name)
-
     def to_dict(self):
         d = super().to_dict()
         d.update({'type': 'projectile', 'homing': self.homing,
@@ -463,7 +461,6 @@ class Projectile(Entity):
                 if each in self.damage_dealt or each.data.is_air_unit: continue
                 if not each.is_alive or each.player == self.player: continue
                 if each.position.distance_to(self.position) < each.data.collision_radius + self.proj.radius:
-                    print('Dealing damage to', each.name)
                     each.take_damage(self.proj.damage)
                     self.damage_dealt.append(each)
                     # now knockback
@@ -503,13 +500,15 @@ class Projectile(Entity):
     def _deal_splash_damage(self) -> None:
         """Deal damage to entities in splash radius using hitbox overlap detection"""
         for entity in list(self.battle_state.entities.values()):
+            if entity.invincible: continue
             if entity.player == self.player or not entity.is_alive: continue
             if entity.data.is_air_unit and not self.proj.hits_air: continue
             if (not entity.data.is_air_unit) and not self.proj.hits_ground: continue
 
             # Use hitbox-based collision detection for more accurate splash damage
             if entity.position.distance_to(self.target_position) <= (self.proj.radius + entity.data.collision_radius):
-                entity.take_damage(self.proj.damage)
+                amount_dealt = self.proj.damage if "King" not in entity.name else round(self.proj.damage * self.proj.crown_tower_percent)
+                entity.take_damage(amount_dealt)
                 if self.proj.buff_time:
                     entity.speed_debuff = min(1 + self.proj.target_buff['speedMultiplier'] / 100, entity.speed_debuff)
                     entity.debuff_time_remaining = self.proj.buff_time
@@ -678,7 +677,6 @@ class BattleState:
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         for entity in list(self.entities.values()):
-            print(entity.name, entity.is_alive)
             entity.update(dt)
             self.ensure_walkability(entity)
         self.resolve_collisions()
@@ -695,11 +693,13 @@ class BattleState:
         card_info = Card(card_name)
         if card_info.type == 'spell' and card_info.projectiles:
             initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
-            initial_position = Position(initial_position.x, initial_position.y)
+
             target = BlankEntity(position)
             delayed_counter = 0
             for wave in range(card_info.projectile_waves):
                 print('creating delayed spawn at', initial_position.x, initial_position.y)
+                print('Spawning, ', wave)
+                initial_position = Position(initial_position.x, initial_position.y)
                 self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
                 delayed_counter += card_info.wave_interval
             return

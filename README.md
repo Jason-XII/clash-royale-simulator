@@ -100,6 +100,8 @@ Caveats:
 - Rage
 - RageBarbarian (English name: Lumberjack)
 - BattleRam
+- Fireball
+- Arrows
 
 ## Where is the code?
 

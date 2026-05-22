@@ -8348,7 +8348,7 @@
             "speed": 1100,
             "damage": 48,
             "crownTowerDamagePercent": -75,
-            "radius": 1400,
+            "radius": 3500,
             "source": "projectiles",
             "tid": "TID_SPELL_ATTRIBUTE_AREA_DAMAGE",
             "tidTarget": "TID_TARGETS_AIR_AND_GROUND"

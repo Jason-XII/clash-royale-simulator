@@ -1,5 +1,5 @@
 import pygame
-from battle import BattleState, Building
+from battle import BattleState, Building, Projectile
 from arena import Position
 from player import PlayerState
 
@@ -10,6 +10,7 @@ AX, AY = 50, 50
 AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
+
 def w2s(x, y): return int(AX+x*TILE), int(AY+y*TILE)
 
 
@@ -44,7 +45,10 @@ class Visualizer:
             sx, sy = w2s(e.position.x, e.position.y)
             color = BLUE if e.player == 0 else RED
             r = int(e.data.collision_radius * TILE)
-            pygame.draw.circle(self.screen, color, (sx,sy), max(r,4))
+            if isinstance(e, Projectile):
+                pygame.draw.circle(self.screen, color, (sx,sy), max(r,4), 2)
+            else:
+                pygame.draw.circle(self.screen, color, (sx, sy), max(r, 4))
             pygame.draw.circle(self.screen, BLACK, (sx,sy), max(r,4), 1)
             # Name
             lbl = self.font.render(e.name, True, BLACK)
@@ -103,5 +107,6 @@ if __name__ == "__main__":
     # v.deploy('Musketeer', (1.5, 18.5), player=1)
     # v.deploy('Giant', (3.5, 18.5), player=1)
     # v.deploy('Giant', (16.5, 18.5), player=1)
-    v.deploy('Fireball', (2.5, 16.5))
+    # v.deploy('Fireball', (2.5, 16.5))
+    v.deploy('Arrows', (2.5, 26.5), delay=1)
     v.run()
