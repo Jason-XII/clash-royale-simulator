@@ -5,14 +5,15 @@ with open('gamedata.json') as f:
     data = json.load(f)
 
 with open('cards_stats_characters.json') as f:
-    extra = json.load(f)
-    air_units = [each['name'] for each in extra if each['flying_height'] != 0]
+    characters_data = json.load(f)
+    air_units = [each['name'] for each in characters_data if each['flying_height'] != 0]
+    characters = {each['name']:each for each in characters_data}
 with open('cards_stats_spell.json') as f:
-    extra = json.load(f)
-    spells = [each['name'] for each in extra]
+    spells_data = json.load(f)
+    spells = {each['name']:each for each in spells_data}
 with open('cards_stats_building.json') as f:
-    extra = json.load(f)
-    buildings = [each['name'] for each in extra]
+    buildings_data = json.load(f)
+    buildings = {each['name']:each for each in buildings_data}
 
 data = data['items']['spells']
 card_data = {each['name']: each for each in data}
@@ -50,6 +51,7 @@ card_data['King_PrincessTowers']['summonCharacterData'] = card_data['King_Prince
 class Card:
     def __init__(self, card_name):
         self.data = card_data[card_name]
+        self.data.setdefault('summonCharacterData', {})
         self.hp = self.data['summonCharacterData'].get('hitpoints', 0)
         self.elixir = self.data.get('manaCost') # princess towers don't have elixir cost
         self.name = self.data['name']
@@ -91,8 +93,25 @@ class Card:
 
         self.tower_damage_mult = 1+self.data['summonCharacterData'].get('crownTowerDamagePercent', 0)/100
 
+        self.type = self.data.get('tidType', '').split('_')[-1].lower()
+        self.rarity = self.data.get('rarity', 'Common')
+
         if self.name == 'King_PrincessTowers':
             self.collision_radius = 1.5
+
+    def set_level(self, level):
+        if self.rarity == 'Common': level_index = level - 1
+        elif self.rarity == 'Rare': level_index = level - 3
+        elif self.rarity == 'Epic': level_index = level - 6
+        elif self.rarity == 'Legendary': level_index = level - 9
+        elif self.rarity == 'Champion': level_index = level - 11
+        if self.type == 'character':
+            character_name = self.data['summonCharacterData']['name']
+            self.hp = characters[character_name]["hitpoints_per_level"][level_index]
+            if self.damage:
+                print(character_name, characters[character_name]["damage_per_level"][level_index], self.hp)
+
+        return level
 
 class Projectile:
     def __init__(self, projectile_data):
@@ -134,4 +153,6 @@ class AreaEffectData:
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':
-    print(Card('Barbarian'))
+    deck = ['Archer', 'Giant', 'Musketeer', 'MiniPekka', 'Fireball', 'Arrows', 'Minions', 'Knight']
+    for each in deck:
+        Card(each).set_level(11)
