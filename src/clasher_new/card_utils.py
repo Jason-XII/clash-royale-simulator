@@ -14,6 +14,8 @@ with open('cards_stats_spell.json') as f:
 with open('cards_stats_building.json') as f:
     buildings_data = json.load(f)
     buildings = {each['name']:each for each in buildings_data}
+with open('cards_stats_projectile.json') as f:
+    projectiles = {each['name']:each for each in json.load(f)}
 
 data = data['items']['spells']
 card_data = {each['name']: each for each in data}
@@ -51,7 +53,7 @@ card_data['King_PrincessTowers']['summonCharacterData'] = card_data['King_Prince
 class Card:
     def __init__(self, card_name):
         self.data = card_data[card_name]
-        self.data.setdefault('summonCharacterData', {})
+        self.data.setdefault('summonCharacterData', self.data)
         self.hp = self.data['summonCharacterData'].get('hitpoints', 0)
         self.elixir = self.data.get('manaCost') # princess towers don't have elixir cost
         self.name = self.data['name']
@@ -105,12 +107,19 @@ class Card:
         elif self.rarity == 'Epic': level_index = level - 6
         elif self.rarity == 'Legendary': level_index = level - 9
         elif self.rarity == 'Champion': level_index = level - 11
+
+        if self.projectiles:
+            projectile_name = self.data['summonCharacterData']['projectileData']['name']
+            self.projectile_data.damage = projectiles[projectile_name]['damage_per_level'][level_index]
+
         if self.type == 'character':
             character_name = self.data['summonCharacterData']['name']
             self.hp = characters[character_name]["hitpoints_per_level"][level_index]
             if self.damage:
-                print(character_name, characters[character_name]["damage_per_level"][level_index], self.hp)
-
+                self.damage = characters[character_name]["damage_per_level"][level_index]
+        elif self.type == 'spell':
+            # For simplicity, just assume that spells are projectiles, which is already handled
+            pass
         return level
 
 class Projectile:
