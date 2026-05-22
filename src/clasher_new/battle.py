@@ -102,15 +102,15 @@ class Entity:
         building_targets = []
         troop_targets = []
         for entity in list(self.battle_state.entities.values()):
-            if (not isinstance(entity, Troop) or not isinstance(entity, Building)) or \
-                    not (entity.is_alive and entity.player != self.player): continue
+            if not isinstance(entity, Troop) and not isinstance(entity, Building): continue
+            if not entity.is_alive or entity.player == self.player: continue
             if not entity.targetable: continue
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
 
             # Might change later: how to determine a target is in sight range, given the collision radius?
-            if distance-entity.data.collision_radius-self.data.collision_radius <= self.data.sight_range:
+            if distance-entity.data.collision_radius <= self.data.sight_range:
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -151,7 +151,7 @@ class Entity:
             self.target_id = None
         else:
             current_target = self.battle_state.entities.get(self.target_id)
-            if current_target.position.distance_to(self.position) - current_target.data.collision_radius - self.data.collision_radius > self.data.sight_range:
+            if current_target.position.distance_to(self.position) - current_target.data.collision_radius > self.data.sight_range:
                 current_target = None
                 self.target_id = None
         best_target = self.get_nearest_target()
@@ -202,13 +202,15 @@ class Troop(Entity):
                   if self.start_jumping_position else None})
         return d
 
-    def move_towards(self, position, dt: float) -> None:
+    def move_towards(self, position, dt: float, can_overshoot=False) -> None:
         dx, dy = position.x-self.position.x, position.y-self.position.y
         distance = math.hypot(dx, dy)
         if distance == 0: return
-        move_distance = min(self.speed * dt * self.speed_buff * self.speed_debuff, distance)
+        if not can_overshoot:
+            move_distance = min(self.speed * dt * self.speed_buff * self.speed_debuff, distance)
+        else:
+            move_distance = self.speed * dt * self.speed_buff * self.speed_debuff
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
-
         # Check if the new position would be walkable (for ground units)
         new_position = Position(self.position.x + move_x, self.position.y + move_y)
 
@@ -235,7 +237,7 @@ class Troop(Entity):
                         self.position.y += new_move_y
                         break
                     else:
-                        # print('Failed', new_move_x*move_x+new_move_y*move_y)
+                        print('Failed', self.name, new_move_x*move_x+new_move_y*move_y)
                         pass
 
     def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
@@ -255,7 +257,7 @@ class Troop(Entity):
         """If no target in sight, where should the troop walk to? """
         near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
         on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
-                    abs(self.position.y - 16.0) <= 1.0)
+                    abs(self.position.y - 16.0) <= 1.5)
         before_bridge = (self.position.y < 15.0 and self.player==0) or (self.position.y > 17.0 and self.player==1)
         if self.data.is_air_unit:
             if self.player == 0:
@@ -269,14 +271,30 @@ class Troop(Entity):
                             min(possible_y, key=lambda y: abs(self.position.y - y)))
         else:
             if self.player == 0:
-                if near_left: target = TileGrid.RED_LEFT_TOWER
-                else: target = TileGrid.RED_RIGHT_TOWER
+                if near_left:
+                    if self.position.y > 15.5:
+                        target = TileGrid.RED_LEFT_TOWER
+                    else:
+                        target = Position(3.5, 16.0)
+                else:
+                    if self.position.y > 15.5:
+                        target = TileGrid.RED_RIGHT_TOWER
+                    else:
+                        target = Position(14.5, 16.0)
                 if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y >= 25.0:
                     target = TileGrid.RED_KING_TOWER
                 return target
             else:
-                if near_left: target = TileGrid.BLUE_LEFT_TOWER
-                else: target = TileGrid.BLUE_RIGHT_TOWER
+                if near_left:
+                    if self.position.y < 16.5:
+                        target = TileGrid.BLUE_LEFT_TOWER
+                    else:
+                        target = Position(3.5, 16.0)
+                else:
+                    if self.position.y < 16.5:
+                        target = TileGrid.BLUE_RIGHT_TOWER
+                    else:
+                        target = Position(14.5, 16.0)
                 if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y <= 7.0:
                     target = TileGrid.BLUE_KING_TOWER
                 return target
@@ -304,7 +322,7 @@ class Troop(Entity):
         if current_target:
             # Move towards target if out of attack range
             distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius + self.data.collision_radius) or self.jumping_across_river:
+            if distance > (self.data.range + current_target.data.collision_radius) or self.jumping_across_river:
                 has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river()
                 if self.data.is_air_unit or has_jump_ability:
                     pathfind_target = current_target.position
@@ -374,9 +392,9 @@ class Troop(Entity):
             real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
             real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
             if not self.path_blocked_counter:
-                self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt)
+                self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt, can_overshoot=True)
             else:
-                self.move_towards(Position(self.position.x + dx, self.position.y + dy), dt)
+                self.move_towards(Position(self.position.x + dx, self.position.y + dy), dt, can_overshoot=True)
 
 
 class Building(Entity):
@@ -481,7 +499,6 @@ class Projectile(Entity):
             return
 
         target_position_final = self.target_position if not self.homing else self.target.position
-        print(target_position_final.x, target_position_final.y, self.position.x, self.position.y)
         distance = self.position.distance_to(target_position_final)
         if distance <= self.proj.speed * dt:
             if not self.proj.radius:
@@ -569,7 +586,6 @@ class BattleState:
         self.arena = TileGrid()
         self.time = 0.0
         self.tick = 0
-        self.dt = 1 / 60
         self.game_over = False
         self.winner = None
         self.next_entity_id = 1
@@ -609,7 +625,6 @@ class BattleState:
 
     def _spawn_entity(self, entity):
         self.ensure_walkability(entity)
-        print('Spawning entity, ', entity)
         entity.battle_state = self
         entity.id = self.next_entity_id
         self.entities[len(self.entities)+1] = entity
@@ -620,7 +635,6 @@ class BattleState:
         if len(entity_data) == 7:
             return Projectile(*entity_data)
         if card_name in spells:
-            print("Deploying spell, ", card_name, *entity_data)
             return Entity(*entity_data)
         elif card_name in buildings:
             return Building(*entity_data)
@@ -697,8 +711,6 @@ class BattleState:
             target = BlankEntity(position)
             delayed_counter = 0
             for wave in range(card_info.projectile_waves):
-                print('creating delayed spawn at', initial_position.x, initial_position.y)
-                print('Spawning, ', wave)
                 initial_position = Position(initial_position.x, initial_position.y)
                 self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
                 delayed_counter += card_info.wave_interval

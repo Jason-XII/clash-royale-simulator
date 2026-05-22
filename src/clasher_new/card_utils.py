@@ -105,7 +105,7 @@ class Card:
         self.rarity = self.data.get('rarity', 'Common')
 
         if self.name == 'King_PrincessTowers':
-            self.collision_radius = 1.5
+            self.collision_radius = 1.25
 
         self.set_level(11)
 

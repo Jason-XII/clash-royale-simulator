@@ -11,7 +11,9 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-def w2s(x, y): return int(AX+x*TILE), int(AY+y*TILE)
+def w2s(x, y):
+    y = 32 - y
+    return int(AX + x * TILE), int(AY + y * TILE)
 
 
 class Visualizer:
@@ -25,7 +27,8 @@ class Visualizer:
         self.scheduled = []
 
     def deploy(self, card, pos, player=0, delay=0):
-        if delay: self.scheduled.append((delay, player, card, pos))
+        if delay:
+            self.scheduled.append((delay, player, card, pos))
         else:
             self.battle.players[player].elixir = 10
             self.battle.deploy_card(player, card, Position(*pos))
@@ -36,6 +39,10 @@ class Visualizer:
         pygame.draw.rect(self.screen, CYAN, (AX, ry, AW, 2*TILE))
         for bx in [2, 13]:
             pygame.draw.rect(self.screen, DKGRAY, (AX+bx*TILE, ry, 3*TILE, 2*TILE))
+        pygame.draw.rect(self.screen, DKGRAY, (AX, AY, 6*TILE, TILE))
+        pygame.draw.rect(self.screen, DKGRAY, (AX+12*TILE, AY, 6 * TILE, TILE))
+        pygame.draw.rect(self.screen, DKGRAY, (AX, AY+31*TILE, 6 * TILE, TILE))
+        pygame.draw.rect(self.screen, DKGRAY, (AX + 12 * TILE, AY+31*TILE, 6 * TILE, TILE))
         for x in range(19): pygame.draw.line(self.screen, (0,150,0), (AX+x*TILE,AY), (AX+x*TILE,AY+AH), 1)
         for y in range(33): pygame.draw.line(self.screen, (0,150,0), (AX,AY+y*TILE), (AX+AW,AY+y*TILE), 1)
 
@@ -64,7 +71,7 @@ class Visualizer:
                     self.screen.blit(hp_txt, hp_txt.get_rect(center=(sx, sy)))
 
     def draw_ui(self):
-        text = f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x"
+        text = f"t={self.battle.time:.1f}s  tick={self.battle.tick}  speed={self.speed}x time={self.battle.time:.2f}"
         if self.battle.game_over:
             text += f"  Winner={'RED' if self.battle.winner == 1 else 'BLUE'}"
         txt = self.font.render(text, True, BLACK)
@@ -82,12 +89,15 @@ class Visualizer:
                     if ev.key == pygame.K_ESCAPE: running = False
                     elif ev.key == pygame.K_SPACE: self.paused = not self.paused
                     elif pygame.K_1 <= ev.key <= pygame.K_5: self.speed = ev.key - pygame.K_0
+            dt = self.clock.tick(60) / 1000.0
+            # print(dt)
 
             if not self.paused and not self.battle.game_over:
                 for _ in range(self.speed):
-                    self.battle.step(self.battle.dt)
+                    self.battle.step(dt)
                     for d in self.scheduled[:]:
                         if self.battle.time >= d[0]:
+                            self.battle.players[d[1]].elixir = 10
                             self.battle.deploy_card(d[1], d[2], Position(*d[3]))
                             self.scheduled.remove(d)
 
@@ -96,17 +106,25 @@ class Visualizer:
             self.draw_entities()
             self.draw_ui()
             pygame.display.flip()
-            self.clock.tick(60)
+
         pygame.quit()
 
-player_0_deck = ['Arrows', 'Fireball']*4
-player_1_deck = ['Giant', 'Prince']*4
+player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
+player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
+
+schedule = [('Knight', (9.5, 0.5), 0, 0),
+            ('Archer', (8.5, 31.5), 1, 1.376),
+            ('Musketeer', (12.5, 6.5), 0, 8.447),
+            ('Musketeer', (16.5, 29.5), 1, 11.137),
+            ('Minions', (3.5, 12.5), 0, 18.49),
+            ('MiniPekka', (14.5, 18.5), 1, 18.936),
+            ('MiniPekka', (14.5, 13.5), 0, 19.436)]
+
+schedule2 = [('Knight', (9.5, 0.5), 0, 0)]
+
+
 if __name__ == "__main__":
     v = Visualizer()
-    # v.deploy('RageBarbarian', (3.5, 10.5))
-    # v.deploy('Musketeer', (1.5, 18.5), player=1)
-    # v.deploy('Giant', (3.5, 18.5), player=1)
-    # v.deploy('Giant', (16.5, 18.5), player=1)
-    # v.deploy('Fireball', (2.5, 16.5))
-    v.deploy('Arrows', (2.5, 26.5), delay=1)
+    for each in schedule:
+        v.deploy(*each)
     v.run()
