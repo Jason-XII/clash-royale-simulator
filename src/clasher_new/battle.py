@@ -705,6 +705,24 @@ class BattleState:
         if not self.players[player_id].can_play_card(card_name):
             return False
         card_info = Card(card_name)
+        if card_info.type != 'spell':
+            # Check the deployment area is legit
+            if player_id == 0:
+                if position.y >= 21.0: return False
+                elif position.y >= 13.0:
+                    if position.x <= 9:
+                        if self.players[1].left_tower_hp > 0: return False
+                    else:
+                        if self.players[1].right_tower_hp > 0: return False
+            elif player_id == 1:
+                if position.y <= 10: return False
+                elif position.y <= 16.0:
+                    if position.x <= 9:
+                        if self.players[0].left_tower_hp > 0: return False
+                    else:
+                        if self.players[0].right_tower_hp > 0: return False
+
+            pass
         if card_info.type == 'spell' and card_info.projectiles:
             initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
 
@@ -714,7 +732,7 @@ class BattleState:
                 initial_position = Position(initial_position.x, initial_position.y)
                 self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
                 delayed_counter += card_info.wave_interval
-            return
+            return True
 
         positions = get_spawn_position(card_info, position, player_id)
         delayed_counter = 0
