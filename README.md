@@ -51,7 +51,8 @@ Caveats:
 - spells are mostly not implemented yet.
 - Miner's digging logic needs further refinement
 - evo, hero and champion card mechanics are not implemented
-- ...
+- Pathfinding algorithm does not match real gameplay. I don't know why, but characters seems to 
+take a lot longer time to walk around obstacles.
 
 ### Characters implemented
 
