@@ -46,11 +46,11 @@ In the end, I realized that the only way to make all of this work is to re-imple
 - periodic spawning, death damage, death spawning
 - charging, jumping across rivers
 - special slow and freeze effects
+- card interactions are correct
 
 Caveats:
-- spells are mostly not implemented yet.
+- Some cards are not yet implemented (in progress!)
 - Miner's digging logic needs further refinement
-- evo, hero and champion card mechanics are not implemented
 - Pathfinding algorithm does not match real gameplay. I don't know why, but characters seems to 
 take a lot longer time to walk around obstacles.
 
@@ -111,14 +111,20 @@ The folder structure of this repo is very complicated. I'm sorry for the inconve
 The real code files are in `src/clasher_new`. 
 - `__init__.py` is an empty placeholder
 - `gamedata.json` contains very necessary data extracted from the game, like hitpoints, damage, etc.
+- `cards_stats_xxx.json` files are also game data files downloaded from *royaleapi.com*.
 - `card_utils.py` reads `gamedata.json` and provides easy ways to access character attributes
 - `arena.py` defines `TileGrid` which contains information on where each sides' King tower and princess towers are located
 - `player.py` is a short file that stores a player's information in game, like current elixir.
 - `battle.py` contains all the game logic, defining behavior for troops, buildings, projectiles and other mechanics.
+- `core.py` and `card_mechanics.py` provides an interface for special card logic. Makes the system more flexible.
+- `server.py` and `client.py` gives a simple pygame interface that allows two players to connect through local network and play in realtime.
+
 
 ## I need help
 
-This project is far from finishing. I already poured more than 25 hours into this project and many more 
+This project is far from finishing. I already poured more than 70 hours into this project and many more 
 still lies ahead. If you want to contribute, please submit issues or pull requests. 
 
-You are more than welcome to contact me via my email: `2243272839@qq.com`
+You are more than welcome to contact me via my email: `2243272839@qq.com` 
+
+Or you can add my discord: jasoncoder_47308
