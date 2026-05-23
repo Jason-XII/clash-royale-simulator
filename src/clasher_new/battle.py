@@ -709,20 +709,19 @@ class BattleState:
             # Check the deployment area is legit
             if player_id == 0:
                 if position.y >= 21.0: return False
-                elif position.y >= 13.0:
+                elif position.y >= 15.0:
                     if position.x <= 9:
                         if self.players[1].left_tower_hp > 0: return False
                     else:
                         if self.players[1].right_tower_hp > 0: return False
             elif player_id == 1:
                 if position.y <= 10: return False
-                elif position.y <= 16.0:
+                elif position.y <= 17.0:
                     if position.x <= 9:
                         if self.players[0].left_tower_hp > 0: return False
                     else:
                         if self.players[0].right_tower_hp > 0: return False
 
-            pass
         if card_info.type == 'spell' and card_info.projectiles:
             initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
 
