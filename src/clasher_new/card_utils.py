@@ -38,7 +38,7 @@ king_tower_stats = {
         'damage': 109,
         'sightRange': 7000,
         'range': 7000,
-        'collisionRadius': 1750,
+        'collisionRadius': 2000,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
         'deployTime': 3300,
         'loadTime': 700,
@@ -105,7 +105,7 @@ class Card:
         self.rarity = self.data.get('rarity', 'Common')
 
         if self.name == 'King_PrincessTowers':
-            self.collision_radius = 1.25
+            self.collision_radius = 1.5
 
         self.set_level(11)
 

@@ -115,12 +115,12 @@ player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireba
 schedule = [('Knight', (9.5, 0.5), 0, 0),
             ('Archer', (8.5, 31.5), 1, 1.376),
             ('Musketeer', (12.5, 6.5), 0, 8.447),
-            ('Musketeer', (16.5, 29.5), 1, 11.137),
+            ('Musketeer', (16.5, 29.5), 1, 11.13),
             ('Minions', (3.5, 12.5), 0, 18.49),
-            ('MiniPekka', (14.5, 18.5), 1, 18.936),
+            ('MiniPekka', (14.5, 20.5), 1, 18.936),
             ('MiniPekka', (14.5, 13.5), 0, 19.436)]
 
-schedule2 = [('Knight', (9.5, 0.5), 0, 0)]
+schedule2 = [('Knight', (11.5, 1.5), 0, 0)]
 
 
 if __name__ == "__main__":

@@ -221,18 +221,18 @@ class Troop(Entity):
             self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
         else:
             # If direct path is blocked, try to find a way around
-            self.path_blocked_counter += 1 if self.path_blocked_counter <= 3 else 0
+            self.path_blocked_counter += 1 if self.path_blocked_counter < 1 else 0
             original_angle = math.atan2(move_y, move_x)
             move_distance = math.hypot(move_x, move_y)
-            angle_offsets = [i * math.pi / 16 for i in range(1, 17)] + [-i * math.pi / 16 for i in range(1, 17)]
+            angle_offsets = [i * math.pi / 16 for i in range(1, 9)] + [-i * math.pi / 16 for i in range(1, 9)]
             for angle_offset in angle_offsets:
                 new_angle = original_angle + angle_offset
-                new_move_x = math.cos(new_angle) * move_distance
-                new_move_y = math.sin(new_angle) * move_distance
+                new_move_x = math.cos(new_angle) * move_distance * 1.5
+                new_move_y = math.sin(new_angle) * move_distance * 1.5
                 if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
                                                 self.data.collision_radius):
                     # print('Preparing to move to:', self.position.x+new_move_x, self.position.y+new_move_y)
-                    if new_move_x*move_x+new_move_y*move_y >= -0.0001:
+                    if new_move_x*move_x+new_move_y*move_y >= -0.000001:
                         self.position.x += new_move_x
                         self.position.y += new_move_y
                         break
