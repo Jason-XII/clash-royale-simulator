@@ -1,12 +1,3 @@
-references/
-.specstory/
-investigation/
-new_references/
-*.png
-*.jpg
-__pycache__
-.claude
-.cursorindexingignore
-.pytest_cache
-.venv
-logs/
+ideas/
+.DS_store
+.idea/
