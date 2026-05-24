@@ -175,4 +175,6 @@ class AreaEffectData:
         self.crown_tower_damage_percent = self.buff_data.get('crown', 0) or self.data.get('crownTowerDamagePercent', 0)
 
 if __name__ == '__main__':
-    print(Card('Arrows').projectile_waves)
+    deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
+    for each in deck:
+        print(Card(each).attack_air)
