@@ -29,6 +29,7 @@ class CREnv(gym.Env):
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32)
         })
+        self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -38,6 +39,27 @@ class CREnv(gym.Env):
                        player.PlayerState(1, player_1_deck[:], 10))
         # Now return initial observation
         return self.observe(), {}
+
+    def step(self, action):
+        obs = self.observe()
+        slot, x, y = action
+        if slot != 0:
+            card_name = self.battle.players[0].cycle[slot-1]
+            self.battle.deploy_card(0, card_name, (x+0.5, y+0.5))
+        opponent_action = self.opponent(obs)
+        slot, x, y = opponent_action
+        if slot != 0:
+            card_name = self.battle.players[1].cycle[slot - 1]
+            self.battle.deploy_card(1, card_name, (x + 0.5, y + 0.5))
+        # only make decisions per half second
+        for i in range(30):
+            if self.battle.game_over:
+                break
+            self.battle.step(1/60)
+
+        reward = 0
+        return self.observe(), reward, self.battle.game_over, self.battle.game_over, {}
+
 
     def observe(self):
         """Gives a representation of game state"""
@@ -68,7 +90,8 @@ class CREnv(gym.Env):
 
         return {
             'grid': obs,
-            'hand': hand
+            'hand': hand,
+            'elixir': self.battle.players[0].elixir
         }
 
 if __name__ == '__main__':
