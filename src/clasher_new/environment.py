@@ -77,7 +77,7 @@ class CREnv(gym.Env):
         return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
 
 
-    def observe(self, player_id=0):
+    def observe(self, player_id_observe=0):
         """Gives a representation of game state"""
         obs = np.zeros((32, 18, 15))
         for id, each in self.battle.entities.items():
@@ -105,12 +105,12 @@ class CREnv(gym.Env):
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
             obs[y][x] = obs_arr.copy()
 
-        hand = [entity_names.index(each) for each in self.battle.players[player_id].cycle[:5]]
+        hand = [entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]]
 
         return {
             'grid': obs,
             'hand': hand,
-            'elixir': np.array([self.battle.players[player].elixir])
+            'elixir': np.array([self.battle.players[player_id_observe].elixir])
         }
 
 if __name__ == '__main__':
