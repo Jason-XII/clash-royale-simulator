@@ -57,7 +57,7 @@ class Card:
         self.data = card_data[card_name]
         self.data.setdefault('summonCharacterData', self.data)
         self.hp = self.data['summonCharacterData'].get('hitpoints', 0)
-        self.elixir = self.data.get('manaCost') # princess towers don't have elixir cost
+        self.elixir = self.data.get('manaCost', 0) # princess towers don't have elixir cost
         self.name = self.data['name']
         self.damage = self.data['summonCharacterData'].get('damage', 0)
         self.spawn_number = self.data.get('summonNumber', 1)
@@ -137,7 +137,7 @@ class Card:
 class Projectile:
     def __init__(self, projectile_data):
         self.data = projectile_data
-        self.damage = self.data.get('damage')
+        self.damage = self.data.get('damage', 0)
         self.speed = self.data.get('speed', 0) / 60
         self.radius = (self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0)) / 1000
         self.target_buff = self.data.get('targetBuffData', {})
@@ -177,4 +177,4 @@ class AreaEffectData:
 if __name__ == '__main__':
     deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
     for each in deck:
-        print(Card(each).attack_air)
+        print(Card(each).type)

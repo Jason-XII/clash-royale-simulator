@@ -17,12 +17,14 @@ def w2s(x, y):
 
 
 class Visualizer:
-    def __init__(self):
+    def __init__(self, battle=None):
+        """If given a battle object, then render that battle."""
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 18)
-        self.battle = BattleState(PlayerState(0, player_0_deck, 10), PlayerState(1, player_1_deck, 10))
+        self.battle = battle or BattleState(PlayerState(0, player_0_deck, 10), PlayerState(1, player_1_deck, 10))
         self.paused = False
+        self.running = True
         self.speed = 1
         self.scheduled = []
 
@@ -30,7 +32,6 @@ class Visualizer:
         if delay:
             self.scheduled.append((delay, player, card, pos))
         else:
-            self.battle.players[player].elixir = 10
             self.battle.deploy_card(player, card, Position(*pos))
 
     def draw_arena(self):
@@ -80,18 +81,29 @@ class Visualizer:
             p = self.font.render("PAUSED", True, RED)
             self.screen.blit(p, (AX+AW//2-20, AY-20))
 
-    def run(self):
-        running = True
-        while running:
-            for ev in pygame.event.get():
-                if ev.type == pygame.QUIT: running = False
-                elif ev.type == pygame.KEYDOWN:
-                    if ev.key == pygame.K_ESCAPE: running = False
-                    elif ev.key == pygame.K_SPACE: self.paused = not self.paused
-                    elif pygame.K_1 <= ev.key <= pygame.K_5: self.speed = ev.key - pygame.K_0
-            dt = self.clock.tick(60) / 1000.0
-            # print(dt)
+    def process_events(self):
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                self.running = False
+            elif ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
+                    self.running = False
+                elif ev.key == pygame.K_SPACE:
+                    self.paused = not self.paused
+                elif pygame.K_1 <= ev.key <= pygame.K_5:
+                    self.speed = ev.key - pygame.K_0
 
+    def render_frame(self):
+        self.screen.fill(WHITE)
+        self.draw_arena()
+        self.draw_entities()
+        self.draw_ui()
+        pygame.display.flip()
+
+    def run(self):
+        while self.running:
+            self.process_events()
+            dt = self.clock.tick(60) / 1000.0
             if not self.paused and not self.battle.game_over:
                 for _ in range(self.speed):
                     self.battle.step(dt)
@@ -100,13 +112,7 @@ class Visualizer:
                             self.battle.players[d[1]].elixir = 10
                             self.battle.deploy_card(d[1], d[2], Position(*d[3]))
                             self.scheduled.remove(d)
-
-            self.screen.fill(WHITE)
-            self.draw_arena()
-            self.draw_entities()
-            self.draw_ui()
-            pygame.display.flip()
-
+            self.render_frame()
         pygame.quit()
 
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
@@ -120,11 +126,11 @@ schedule = [('Knight', (9.5, 0.5), 0, 0),
             ('MiniPekka', (14.5, 20.5), 1, 18.936),
             ('MiniPekka', (14.5, 14.5), 0, 19.436)]
 
-schedule2 = [('Knight', (11.5, 1.5), 0, 0)]
+schedule2 = [('Arrows', (11.5, 1.5), 0, 0)]
 
 
 if __name__ == "__main__":
     v = Visualizer()
-    for each in schedule:
+    for each in schedule2:
         v.deploy(*each)
     v.run()

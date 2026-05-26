@@ -5,7 +5,7 @@ from card_utils import Card
 class PlayerState:
     def __init__(self, player_id, cycle_queue, elixir, tower_hps=(4824, 3052, 3052)):
         self.player_id = player_id
-        self.cycle = cycle_queue
+        self.cycle = cycle_queue[:]
         self.elixir = elixir
         self.king_tower_hp, self.left_tower_hp, self.right_tower_hp = tower_hps
     
@@ -21,6 +21,7 @@ class PlayerState:
     def play_card(self, card_name):
         """Update the player's deck when playing a card."""
         if not self.can_play_card(card_name): return False
+        print('Playing card:', card_name)
         self.elixir -= Card(card_name).elixir
         self.cycle.remove(card_name)
         self.cycle.append(card_name)
@@ -35,3 +36,12 @@ class PlayerState:
         if self.king_tower_hp <= 0:
             return 3
         return int(self.left_tower_hp <= 0) + int(self.right_tower_hp <= 0)
+
+if __name__ == '__main__':
+    deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
+    p = PlayerState(0, deck, 10)
+    print(p.cycle, p.elixir)
+    p.play_card('Knight')
+    print(p.cycle, p.elixir)
+    p.play_card('Knight')
+    print(p.cycle, p.elixir)
