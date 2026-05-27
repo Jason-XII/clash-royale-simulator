@@ -113,13 +113,13 @@ class CREnv(gym.Env):
             if not each.is_alive: continue
             if isinstance(each, battle.Projectile): continue
             entity_id = entity_names.index(each.name)
+            card_type = card_types.index(each.data.type)
             player_id = each.player
             elixir = each.data.elixir
-            card_type = card_types.index(each.data.type)
-            speed = speed_types.index(each.data.speed)
             is_air = int(each.data.is_air_unit)
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
 
+            speed = each.data.speed
             hp_left = np.log(each.hp) / 10
             hp_percentage = each.hp / each.data.hp if each.data.hp != 0 else 0
             hit_speed = each.data.hit_speed
