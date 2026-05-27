@@ -11,7 +11,9 @@ import torch
 from train import CRFeatureExtractor
 
 env = CREnv(opponent_model=lambda obs: random_strategy(obs))
-model = PPO('MultiInputPolicy', env, policy_kwargs={"features_extractor_class": CRFeatureExtractor})
+model = PPO('MultiInputPolicy', env, policy_kwargs={"features_extractor_class": CRFeatureExtractor},
+            verbose=1, tensorboard_log="./cr_logs")
+model.save('cr_checkpoint')
 
 # Test env stepping alone (no model)
 obs, _ = env.reset()

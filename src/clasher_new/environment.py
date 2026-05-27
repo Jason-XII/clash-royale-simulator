@@ -103,7 +103,7 @@ class CREnv(gym.Env):
             else:
                 reward -= 10
 
-        return self.observe(0), reward, not self.battle.game_over, not self.battle.game_over, {}
+        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
 
 
     def observe(self, player_id_observe=0):
