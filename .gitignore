@@ -1,3 +1,5 @@
 ideas/
-.DS_store
+*.DS_store
 .idea/
+*.xml
+*.iml
