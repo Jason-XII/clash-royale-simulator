@@ -696,7 +696,7 @@ class BattleState:
         self.resolve_collisions()
 
         for entity, spawn_time in self.schedule:
-            if self.time > spawn_time: self._spawn_entity(self._wrap(entity))
+            if self.time >= spawn_time: self._spawn_entity(self._wrap(entity))
         self.schedule = [each for each in self.schedule if each[1] > self.time]
         self.time += dt
         self.tick += 1
@@ -705,6 +705,7 @@ class BattleState:
         if not self.players[player_id].can_play_card(card_name):
             return False
         card_info = Card(card_name)
+
         if card_info.type != 'spell':
             # Check the deployment area is legit
             if self.is_position_occupied_by_building(position, 0): return False

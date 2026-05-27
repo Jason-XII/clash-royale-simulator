@@ -30,10 +30,11 @@ speed_types = [0, 0.75, 1.0, 1.5]
 
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, visualize=False):
+    def __init__(self, opponent_model=None, visualize=False, speed=1.0):
         super().__init__()
         self.opponent = opponent_model
         self.battle: battle.BattleState = None
+        self.speed = speed
         self.observation_space = gym.spaces.Dict({
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
@@ -86,9 +87,9 @@ class CREnv(gym.Env):
         for i in range(30):
             if self.battle.game_over:
                 break
-            self.battle.step(1/60)
+            for j in range(int(self.speed)):
+                self.battle.step(1/60)
             if self.visualizer:
-                self.visualizer.process_events()
                 self.visualizer.render_frame()
                 time.sleep(1/60)
         blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
