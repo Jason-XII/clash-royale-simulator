@@ -7,6 +7,8 @@ from random import shuffle, randint
 import time
 import numpy as np
 
+from stable_baselines3.common.env_checker import check_env
+
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
 
@@ -46,8 +48,8 @@ class CREnv(gym.Env):
         super().reset(seed=seed, options=options)
         shuffle(player_0_deck)
         shuffle(player_1_deck)
-        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 10),
-                       player.PlayerState(1, player_1_deck[:], 10))
+        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
+                       player.PlayerState(1, player_1_deck[:], 5.0))
         if self.visualize:
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
@@ -85,9 +87,10 @@ class CREnv(gym.Env):
             if self.battle.game_over:
                 break
             self.battle.step(1/60)
-            self.visualizer.process_events()
-            self.visualizer.render_frame()
-            time.sleep(1/60)
+            if self.visualizer:
+                self.visualizer.process_events()
+                self.visualizer.render_frame()
+                time.sleep(1/60)
         blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
         red_hps_new = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
         blue_left_new = 3-p1.get_crown_count()
@@ -105,7 +108,7 @@ class CREnv(gym.Env):
 
     def observe(self, player_id_observe=0):
         """Gives a representation of game state"""
-        obs = np.zeros((32, 18, 15))
+        obs = np.zeros((32, 18, 15), dtype=np.float32)
         for id, each in self.battle.entities.items():
             if not each.is_alive: continue
             if isinstance(each, battle.Projectile): continue
@@ -133,12 +136,13 @@ class CREnv(gym.Env):
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
             obs[y][x] = obs_arr.copy()
 
-        hand = [entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]]
+        hand = np.array([entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]],
+                        dtype=np.int32)
 
         return {
             'grid': obs,
             'hand': hand,
-            'elixir': np.array([self.battle.players[player_id_observe].elixir])
+            'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32)
         }
 
 
@@ -150,10 +154,6 @@ def random_strategy(observation):
 
 if __name__ == '__main__':
     env = CREnv(random_strategy, visualize=True)
-    obs, _ = env.reset()
-    running = True
-    while running:
-        obs, reward, termination, truncation, info = env.step(env.action_space.sample())
-        running = termination or truncation
+    check_env(env)
 
 

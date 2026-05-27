@@ -6,6 +6,7 @@
     </content>
     <orderEntry type="jdk" jdkName="deep" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module" module-name="sb3-test" />
   </component>
   <component name="PyDocumentationSettings">
     <option name="format" value="PLAIN" />

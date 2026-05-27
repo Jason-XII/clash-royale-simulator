@@ -21,7 +21,6 @@ class PlayerState:
     def play_card(self, card_name):
         """Update the player's deck when playing a card."""
         if not self.can_play_card(card_name): return False
-        print('Playing card:', card_name)
         self.elixir -= Card(card_name).elixir
         self.cycle.remove(card_name)
         self.cycle.append(card_name)
