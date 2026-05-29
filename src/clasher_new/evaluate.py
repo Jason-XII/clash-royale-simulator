@@ -1,17 +1,23 @@
+import sys
+import numpy as np
+
 from environment import CREnv, random_strategy
 from stable_baselines3 import PPO
 
-env = CREnv(opponent_model=lambda obs: random_strategy(obs), visualize=True, speed=1)
-model = PPO.load("cr_checkpoint", env=env)
+opponent_model = PPO.load('cr_checkpoint.zip')
 
-obs, _ = env.reset()
+env = CREnv(opponent_model=lambda obs: opponent_model.predict(obs)[0], visualize=True, speed=3)
+model = PPO.load("cr_logs/cr_647734_steps", env=env)
+opponent_model.set_env(env)
 
-done = False
-total_reward = 0
-while not done:
-    action, _ = model.predict(obs)
-    obs, reward, termination, truncation, info = env.step(action)
-    done = termination or truncation
-    total_reward += reward
+for i in range(1):
+    obs, _ = env.reset()
+    done = False
+    total_reward = 0
+    while not done:
+        action, _ = model.predict(obs)
+        obs, reward, termination, truncation, info = env.step(action)
+        done = termination or truncation
+        total_reward += reward
 
-print(total_reward)
+    print(total_reward)

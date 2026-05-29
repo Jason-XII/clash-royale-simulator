@@ -3,7 +3,7 @@ from environment import CREnv, random_strategy, entity_names
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -41,7 +41,7 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
 
         rest = grid[..., 1:]  # (B, 32, 18, 14)
         x = torch.cat([rest, card_vecs], dim=-1)  # (B, 32, 18, 14+EMBED)
-        card_type = grid[..., 3].long()  # (B, 32, 18)
+        card_type = x[..., 0].long()  # (B, 32, 18)
         card_type_oh = F.one_hot(card_type, num_classes=4).float()  # (B, 32, 18, 4)
         rest = x[..., 1:]
         x = torch.cat([rest, card_type_oh], dim=-1)
@@ -54,14 +54,47 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         return torch.relu(self.fc(combined))
 
 
-if __name__ == '__main__':
-    env = CREnv(opponent_model=lambda obs: random_strategy(obs))
+class WeightsCopyingCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
 
+    def _on_step(self):
+        if self.num_timesteps % 50000 == 0:
+            opponent.policy.load_state_dict(self.model.policy.state_dict())
+        return True
+
+class RandomEvalCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % 50000 == 0:
+            rewards = []
+            eval_env = CREnv(opponent_model=lambda obs: random_strategy(obs))
+            for i in range(5):
+                obs, _ = eval_env.reset()
+                done = False
+                total_reward = 0
+                while not done:
+                    action, _ = self.model.predict(obs)
+                    obs, reward, termination, truncation, info = eval_env.step(action)
+                    done = termination or truncation
+                    total_reward += reward
+
+                rewards.append(total_reward)
+            self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
+        return True
+
+
+if __name__ == '__main__':
+    opponent = PPO.load("cr_checkpoint")
+    env = CREnv(opponent_model=lambda obs: opponent.predict(obs)[0])
 
     model = PPO.load("cr_checkpoint", env=env)
     cb = CheckpointCallback(save_freq=10_000, save_path="./cr_logs/", name_prefix="cr")
     try:
-        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=cb)
+        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb, WeightsCopyingCallback(),
+                                                                                    RandomEvalCallback()])
     finally:
         print('Saving model.')
         model.save('cr_checkpoint')
