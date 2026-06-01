@@ -40,7 +40,7 @@ class CREnv(gym.Env):
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32)
         })
-        self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
+        self.action_space = gym.spaces.Discrete(5 * 32 * 18)
 
         self.visualize = visualize
         self.visualizer = None
@@ -55,6 +55,12 @@ class CREnv(gym.Env):
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
         return self.observe(0), {}
+
+    def decode_action(self, action):
+        slot = action // (32 * 18)
+        y = (action % (32 * 18)) // 18
+        x = action % 18
+        return slot, y, x
 
     def step(self, action):
         """
@@ -72,13 +78,13 @@ class CREnv(gym.Env):
         blue_left = 3-p1.get_crown_count()
         red_left = 3-p0.get_crown_count() # reversed because it counts destroyed towers
 
-        slot, y, x = action
+        slot, y, x = self.decode_action(action)
         if slot != 0:
             card_name = p0.cycle[slot-1]
             self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
 
         opponent_action = self.opponent(obs1)
-        slot, y, x = opponent_action
+        slot, y, x = self.decode_action(opponent_action)
         if slot != 0:
             card_name = p1.cycle[slot - 1]
             self.battle.deploy_card(1, card_name, Position((17-x)+0.5, (31-x)+0.5))
@@ -94,11 +100,13 @@ class CREnv(gym.Env):
                 time.sleep(1/60)
         blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
         red_hps_new = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
-        blue_left_new = 3-p1.get_crown_count()
-        red_left_new = 3-p0.get_crown_count()
+        blue_left_new = 3-p0.get_crown_count()
+        red_left_new = 3-p1.get_crown_count()
 
-        reward = 5*(red_left-red_left_new)-5*(blue_left-blue_left_new)+0.02*(red_hps_old-red_hps_new)-0.02*(blue_hps_old-blue_hps_new)
+        reward = 5*(red_left-red_left_new)-5*(blue_left-blue_left_new)+0.001*(red_hps_old-red_hps_new)-0.0012*(blue_hps_old-blue_hps_new)
         if self.battle.game_over:
+            print('Battle over.', self.battle.winner, reward, p0.king_tower_hp, p0.left_tower_hp, p0.right_tower_hp,
+                  p1.king_tower_hp, p1.left_tower_hp, p1.right_tower_hp)
             if self.battle.winner == 0:
                 reward += 10
             else:
@@ -151,7 +159,8 @@ def random_strategy(observation):
     slot = randint(0, 4)
     y = randint(0, 31)
     x = randint(0, 17)
-    return slot, y, x
+    action = slot * (32 * 18) + y * 18 + x
+    return action
 
 if __name__ == '__main__':
     env = CREnv(random_strategy, visualize=True)

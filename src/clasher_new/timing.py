@@ -10,11 +10,13 @@ def make_env():
 if __name__ == '__main__':
 
     env = make_env()
+    env.reset()
 
     model = PPO('MultiInputPolicy', env, policy_kwargs={"features_extractor_class": CRFeatureExtractor},
                 verbose=1, tensorboard_log="./cr_logs")
-
-    # Test env stepping alone (no model)
+    model.save('cr_discrete')
+    print('Stepping the environment 100 times:')
     t0 = time.time()
-    model.learn(1)
-    print('Time for 2048 timesteps: ', time.time()-t0)
+    for i in range(100): env.step(random_strategy([]))
+    t1 = time.time()
+    print('Took', (t1-t0)*10, 'milliseconds per step.')

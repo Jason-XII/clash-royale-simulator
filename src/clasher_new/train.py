@@ -87,14 +87,13 @@ class RandomEvalCallback(BaseCallback):
 
 
 if __name__ == '__main__':
-    opponent = PPO.load("cr_checkpoint")
-    env = CREnv(opponent_model=lambda obs: opponent.predict(obs)[0])
+    env = CREnv(opponent_model=lambda obs: random_strategy(obs))
 
-    model = PPO.load("cr_checkpoint", env=env)
+    model = PPO.load("cr_discrete", env=env)
+    opponent = PPO.load("cr_discrete", env=env)
     cb = CheckpointCallback(save_freq=10_000, save_path="./cr_logs/", name_prefix="cr")
     try:
-        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb, WeightsCopyingCallback(),
-                                                                                    RandomEvalCallback()])
+        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb])
     finally:
         print('Saving model.')
-        model.save('cr_checkpoint')
+        model.save('cr_discrete')
