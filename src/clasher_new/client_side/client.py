@@ -55,11 +55,12 @@ for name in english_names:
 # --- Card selection screen ---
 def card_selection_screen():
     selected = []
+    scroll_y = 0
     while True:
         screen.fill((30, 30, 30))
         for i, name in enumerate(english_names):
             col, row = i % COLS, i // COLS
-            x, y = 20 + col * (CARD_W + 10), 20 + row * (CARD_H + 20)
+            x, y = 20 + col * (CARD_W + 10), 20 + row * (CARD_H + 20) - scroll_y
             screen.blit(images[name], (x, y))
             if name in selected:
                 pygame.draw.rect(screen, (0, 255, 0), (x, y, CARD_W, CARD_H), 3)
@@ -67,24 +68,28 @@ def card_selection_screen():
             screen.blit(lbl, (x, y + CARD_H + 2))
 
         msg = font.render(f"Select 8 cards ({len(selected)}/8)", True, (255, 255, 255))
-        screen.blit(msg, (20, 600))
+        screen.blit(msg, (20, 660))
         if len(selected) == 8:
-            btn = pygame.draw.rect(screen, (0, 180, 0), (500, 590, 160, 45))
-            screen.blit(font.render("Confirm", True, (255,255,255)), (535, 603))
+            btn = pygame.draw.rect(screen, (0, 180, 0), (500, 650, 160, 45))
+            screen.blit(font.render("Confirm", True, (255,255,255)), (535, 663))
 
         pygame.display.flip()
         for event in pygame.event.get():
             if event.type == pygame.QUIT: pygame.quit(); exit()
+            if event.type == pygame.MOUSEWHEEL:
+                scroll_y = max(0, scroll_y - event.y * 30)
+                continue
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mx, my = event.pos
+                mx, my = event.pos[0], event.pos[1] + scroll_y
                 for i, name in enumerate(english_names):
                     col, row = i % COLS, i // COLS
                     x, y = 20 + col * (CARD_W + 10), 20 + row * (CARD_H + 20)
                     if x <= mx <= x+CARD_W and y <= my <= y+CARD_H:
                         if name in selected: selected.remove(name)
                         elif len(selected) < 8: selected.append(name)
-                if len(selected) == 8 and 500 <= mx <= 660 and 590 <= my <= 635:
+                if len(selected) == 8 and 500 <= event.pos[0] <= 660 and 650 <= event.pos[1] <= 695:
                     return selected
+
 
 # --- IP input screen ---
 def ip_input_screen():
