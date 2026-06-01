@@ -16,13 +16,4 @@ CARDS = [
     "Rage", "RageBarbarian", "BattleRam", "Fireball", "Arrows"
 ]
 
-english_names = [card_data[each]['englishName'] for each in CARDS]
-resolved = dict(zip(english_names, CARDS))
-with open("cards.json") as f:
-    cards = json.load(f)["items"]
-
-names = {each['name']: each["iconUrls"]["medium"] for each in cards}
-for each in english_names:
-    img = httpx.get(names[each]).content
-    Path(f"images/{each}.png").write_bytes(img)
-    print(f"Downloaded {each}")
+print(len(CARDS))

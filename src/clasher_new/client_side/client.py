@@ -17,10 +17,16 @@ CARDS = [
     "Minions", "Skeletons", "SkeletonArmy", "Balloon", "Witch",
     "Barbarians", "Golem", "Valkyrie", "Bomber", "Musketeer",
     "BabyDragon", "Prince", "Wizard", "SpearGoblins",
-    "GiantSkeleton", "HogRider", "MinionHorde"
+    "GiantSkeleton", "HogRider", "MinionHorde","RoyalGiant",
+    "Princess", "ThreeMusketeers", "BlowdartGoblin", "EliteBarbarians",
+    "Bats", "FlyingMachine", "RoyalHogs", "Cannon", "Xbow",
+    "IceWizard", "SkeletonWarriors", "DarkPrince", "LavaHound",
+    "IceSpirits", "FireSpirits", "Miner", "Sparky", "Bowler",
+    "Rage", "Lumberjack", "BattleRam", "Fireball", "Arrows"
 ]
 
 english_names = [card_data[each]['englishName'] for each in CARDS]
+
 resolved = dict(zip(english_names, CARDS))
 
 CARD_SIZE = 80

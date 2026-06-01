@@ -99,4 +99,4 @@ class GameServer:
         print(f"Game over! Winner: Player {self.battle.winner}")
 
 if __name__ == '__main__':
-    GameServer('10.235.130.132').run()
+    GameServer('100.65.49.83').run()
