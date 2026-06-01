@@ -18,11 +18,11 @@ CARDS = [
     "Barbarians", "Golem", "Valkyrie", "Bomber", "Musketeer",
     "BabyDragon", "Prince", "Wizard", "SpearGoblins",
     "GiantSkeleton", "HogRider", "MinionHorde","RoyalGiant",
-    "Princess", "ThreeMusketeers", "BlowdartGoblin", "EliteBarbarians",
-    "Bats", "FlyingMachine", "RoyalHogs", "Cannon", "Xbow",
+    "Princess", "ThreeMusketeers", "BlowdartGoblin", "AngryBarbarians",
+    "Bats", "DartBarrell", "RoyalHogs", "Cannon", "Xbow",
     "IceWizard", "SkeletonWarriors", "DarkPrince", "LavaHound",
-    "IceSpirits", "FireSpirits", "Miner", "Sparky", "Bowler",
-    "Rage", "Lumberjack", "BattleRam", "Fireball", "Arrows"
+    "IceSpirits", "FireSpirits", "Miner", "ZapMachine", "Bowler",
+    "Rage", "RageBarbarian", "BattleRam", "Fireball", "Arrows"
 ]
 
 english_names = [card_data[each]['englishName'] for each in CARDS]
