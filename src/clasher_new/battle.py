@@ -56,7 +56,8 @@ class Entity:
             'y': self.position.y,
             'hp': self.hp,
             'max_hp': self.data.hp,
-            'deploy_delay_remaining': getattr(self, 'deploy_delay_remaining', 0),
+            'shield_max_hp': self.data.shield_health,
+            'shield_hp': self.shield_health,
             'collision_radius': self.data.collision_radius if not isinstance(self, Projectile) else 0.3
         }
 
@@ -197,9 +198,7 @@ class Troop(Entity):
 
     def to_dict(self):
         d = super().to_dict()
-        d.update({'type': 'troop', 'path_blocked_counter': self.path_blocked_counter,
-                  'start_jumping_position': (self.start_jumping_position.x, self.start_jumping_position.y)
-                  if self.start_jumping_position else None})
+        d.update({'type': 'troop', })
         return d
 
     def move_towards(self, position, dt: float, can_overshoot=False) -> None:
@@ -409,8 +408,7 @@ class Building(Entity):
 
     def to_dict(self):
         d = super().to_dict()
-        d.update({'type': 'building', 'lifetime_elapsed': self.lifetime_elapsed,
-                  'tower_active': self.tower_active, 'persistent': self.persistent})
+        d.update({'type': 'building'})
         return d
 
     def take_damage(self, amount: float):
@@ -459,9 +457,7 @@ class Projectile(Entity):
 
     def to_dict(self):
         d = super().to_dict()
-        d.update({'type': 'projectile', 'homing': self.homing,
-                  'target_position': (self.target_position.x, self.target_position.y)
-                  if self.target_position else None})
+        d.update({'type': 'projectile'})
         return d
 
     def update(self, dt):

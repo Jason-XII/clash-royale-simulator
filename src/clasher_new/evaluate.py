@@ -15,6 +15,7 @@ for i in range(1):
     while not done:
         action, _ = model.predict(obs)
         obs, reward, termination, truncation, info = env.step(action)
+        # print(reward)
         done = termination or truncation
         total_reward += reward
 
