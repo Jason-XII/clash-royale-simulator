@@ -40,7 +40,7 @@ class CREnv(gym.Env):
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32)
         })
-        self.action_space = gym.spaces.Discrete(5 * 32 * 18)
+        self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
         self.visualize = visualize
         self.visualizer = None
@@ -55,12 +55,6 @@ class CREnv(gym.Env):
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
         return self.observe(0), {}
-
-    def decode_action(self, action):
-        slot = action // (32 * 18)
-        y = (action % (32 * 18)) // 18
-        x = action % 18
-        return slot, y, x
 
     def step(self, action):
         """
@@ -78,13 +72,13 @@ class CREnv(gym.Env):
         blue_left = 3-p0.get_crown_count()
         red_left = 3-p1.get_crown_count()
 
-        slot, y, x = self.decode_action(action)
+        slot, y, x = action
         if slot != 0:
             card_name = p0.cycle[slot-1]
             self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
 
         opponent_action = self.opponent(obs1)
-        slot, y, x = self.decode_action(opponent_action)
+        slot, y, x = opponent_action
         if slot != 0:
             card_name = p1.cycle[slot - 1]
             self.battle.deploy_card(1, card_name, Position((17-x)+0.5, (31-x)+0.5))
@@ -159,8 +153,7 @@ def random_strategy(observation):
     slot = randint(0, 4)
     y = randint(0, 31)
     x = randint(0, 17)
-    action = slot * (32 * 18) + y * 18 + x
-    return action
+    return slot, y, x
 
 if __name__ == '__main__':
     env = CREnv(random_strategy, visualize=True)
