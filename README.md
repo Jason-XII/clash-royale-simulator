@@ -7,7 +7,7 @@ This project is still under active development.
 ## Requirements
 
 ```bash
-pip install pygame fastcore --user --no-cache-dir
+pip install pygame fastcore numpy==1.26.4 stable-baselines3 tensorboard --user --no-cache-dir
 ```
 
 ## How to play
