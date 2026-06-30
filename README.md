@@ -1,6 +1,23 @@
-This project is still under active development. 
-
 # Clash Royale Simulator 
+
+Finally! A Clash Royale bot training environment that's playable, actively maintained and has a RL interface.
+
+I like clash royale and want to train a RL agent to play the game. 
+However, a simulator is needed to speed up training. I searched on GitHub and the only usable project I found
+was samdickson22's [repository](https://github.com/samdickson22/clash-simulator). I noticed that the code is almost completely written by AI, which is hard to read and impossible for humans to make improvements on the code.
+
+In the end, I realized that the only way to make all of this work is to re-implement the whole game from scratch, without any vibe-coding.
+
+Now, I present this functioning simulator that implemented 47 cards including troops,
+buildings and spells (complete list below) and can reach the simulation speed of 83 microseconds per tick.
+This means that the simulator can play more than 1000 games (with itself) within an hour.
+
+I also designed a RL training environment compatible with gymnasium and stable-baselines3, supporting out-of-the-box training.
+I used a PPO algorithm to train a basic model for 3M timesteps and can reach a winrate of 83% against a non-trained version of the agent.
+
+To quickly know more information about my project, see [my paper](ClashSimPaper.pdf).
+
+## Game Interface
 
 ![demo](./demo.gif)
 
@@ -24,16 +41,6 @@ then that will probably start with a 10.xx.xx.xx.
 5. When two clients are connected to the same server, the game starts automatically! 
 You can see elixir, drag and drop to deploy cards, see entities on the screen, etc.
 
-## Why I created this repository
-I like clash royale and want to train a RL agent to play the game. 
-However, a simulator is needed to speed up training. I searched on GitHub and the only usable project I found
-was samdickson22's [repository](https://github.com/samdickson22/clash-simulator). 
-
-I did some investigation and found that although the simulator has most clash royale's features
-implemented, the code is almost completely written by AI - hard to read and impossible for humans to make improvements on the code.
-
-After examining the project structure more closely, I spent about 10 hours refactoring the core pieces of the codebase.
-In the end, I realized that the only way to make all of this work is to re-implement the whole game from scratch, without any vibe-coding.
 
 ## Current Progress
 
