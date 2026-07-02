@@ -126,6 +126,36 @@ The real code files are in `src/clasher_new`.
 - `core.py` and `card_mechanics.py` provides an interface for special card logic. Makes the system more flexible.
 - `server.py` and `client.py` gives a simple pygame interface that allows two players to connect through local network and play in realtime.
 
+## To-do list
+
+I trained the model for 8M steps and the win rate stops improving at around 70-80%. This is probably
+caused by the model trying to independently predict the card, position x and position y.
+Humans make decisions by choosing all three simultaneously, we first determine (vaguely)
+what we should do, and then do the actual placement. So I think the model can perform better
+if I let it produce the x and y position at once, or we use a different structure entirely
+by using the selection attention framework introduced in another paper. I might have to 
+learn more about that paper. 
+
+Against a random agent, the PPO model should train relatively well and be consistently winning
+after 1-2M steps. So something's probably wrong with the model architecture.
+
+I also thought of a way to determine the level of game playing agents: tier testing.
+Imagine we have a pool of agents and we let them fight for enough rounds. Good enough agents will 
+consistently win and those with winrates over 70% can make it to the next tier. The logic 
+might be a little flawed here but points to the right direction.
+
+Lots of new benchmarks can be added besides the winrate against a random agent. For example,
+we can test the agent's use of spells by placing swarm units at the bridge. By placing a
+mini pekka behind a giant we test the agent's ability of defending. 
+
+The environment can also be refined. The agent needs to know the phase of the game that 
+it's currently in, because decks have different strategies in single, double and triple elixir.
+When it's near the end of the game and overtime, the agent may need to cycle spells to win.
+
+The biggest flaw in the simulator is that the king tower activation seems a bit off. 
+The king tower seems to have a shorter range than the musketeer, which is very strange.
+But this can be easily fixed.
+
 
 ## I need help
 
