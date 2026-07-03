@@ -21,15 +21,18 @@ To quickly know more information about my project, see [my paper](ClashSimPaper.
 
 ![demo](./demo.gif)
 
-## Requirements
+## Installation
 
+Run the following command in your terminal to clone this repository and install the required python packages.
 ```bash
+git clone https://github.com/Jason-XII/clash-royale-simulator.git
+cd clash-royale-simulator
 pip install pygame fastcore numpy==1.26.4 stable-baselines3 tensorboard --user --no-cache-dir
 ```
 
 ## How to play
 
-Yes, this simulator is already playable! You need two computers that connect to the same local network. 
+This simulator is already playable! You need two computers that connect to the same local network. 
 
 1. Run `ipconfig` on Windows or `ifconfig | grep inet` on macOS. Find your ip address in the local network. 
 If you are at home, the address should look like 192.168.xx.xx, if you are connected to a school network, 
@@ -42,26 +45,15 @@ then that will probably start with a 10.xx.xx.xx.
 You can see elixir, drag and drop to deploy cards, see entities on the screen, etc.
 
 
-## Current Progress
+## Supported features
 
-- tower placement: done.
-- troop spawning: done.
-- pathfinding and going around obstacles: done.
-- attacking and following enemy troops in sight: done.
-- creating projectiles: done.
-- handling entity collision: done.
-- periodic spawning, death damage, death spawning
-- charging, jumping across rivers
-- special slow and freeze effects
-- card interactions are correct
+I have implemented 47 cards in total, no evolutions, hero or champion cards are
+implemented yet. The simulator's behavior is not *completely* consistent with real gameplay
+and I'm continuously trying to improve this. For example, the path finding algorithm 
+uses a non-search approach, which is faster but makes the characters slightly slower 
+when walking. This might be solved in the future though.
 
-Caveats:
-- Some cards are not yet implemented (in progress!)
-- Miner's digging logic needs further refinement
-- Pathfinding algorithm does not match real gameplay. I don't know why, but characters seems to 
-take a lot longer time to walk around obstacles.
-
-### Characters implemented
+Complete list of implemented cards:
 
 - Knight
 - Giant
@@ -111,9 +103,11 @@ take a lot longer time to walk around obstacles.
 - Fireball
 - Arrows
 
-## Where is the code?
+## Read the code
 
-The folder structure of this repo is very complicated. I'm sorry for the inconvenience!
+If you are interested in this project, you can consider reading my code and figure out
+how the simulator work for yourself. I tried my best to write clear code. Here's a brief
+explanation of each python file in the repo, listed in suggested reading order:
 
 The real code files are in `src/clasher_new`. 
 - `__init__.py` is an empty placeholder
@@ -161,7 +155,7 @@ But this can be easily fixed.
 
 ## I need help
 
-This project is far from finishing. I already poured more than 70 hours into this project and many more 
+This project is far from finishing. I already poured more than 100 hours into this project and many more 
 still lies ahead. If you want to contribute, please submit issues or pull requests. 
 
 You are more than welcome to contact me via my email: `2243272839@qq.com` 

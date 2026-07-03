@@ -1,9 +1,5 @@
-import sys
-import numpy as np
-
 import battle, player
 from new_visualization import Visualizer
-
 
 from environment import CREnv, random_strategy, player_0_deck, shuffle, Position
 from stable_baselines3 import PPO
