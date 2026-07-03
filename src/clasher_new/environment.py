@@ -56,6 +56,17 @@ class CREnv(gym.Env):
         # Now return initial observation
         return self.observe(0), {}
 
+    def opponent_action(self):
+        obs1 = self.observe(1)
+        opponent_action = self.opponent(obs1)
+        slot, y, x = opponent_action
+        p1 = self.battle.players[1]
+        if slot != 0:
+            card_name = p1.cycle[slot - 1]
+            self.battle.deploy_card(1, card_name, Position((17-x)+0.5, (31-y)+0.5))
+            # Yes, this transformation seems weird, but it should be correct
+
+
     def step(self, action):
         """
         The action is a tuple with three values: (slot, y, x). When slot=0, no action is performed. Else deploy card on
@@ -64,7 +75,6 @@ class CREnv(gym.Env):
         destroyed tower/lost tower and won game/lose game.
         The opponent is a function that takes in the observation and outputs the action tuple.
         """
-        obs0, obs1 = self.observe(0), self.observe(1)
 
         p0, p1 = self.battle.players
         blue_hps_old = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
@@ -77,12 +87,7 @@ class CREnv(gym.Env):
             card_name = p0.cycle[slot-1]
             self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
 
-        opponent_action = self.opponent(obs1)
-        slot, y, x = opponent_action
-        if slot != 0:
-            card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, Position((17-x)+0.5, (31-x)+0.5))
-            # Yes, this transformation seems weird, but it should be correct
+        self.opponent_action()
         # only make decisions per half second
         for i in range(30):
             if self.battle.game_over:

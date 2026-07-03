@@ -144,6 +144,8 @@ Imagine we have a pool of agents and we let them fight for enough rounds. Good e
 consistently win and those with winrates over 70% can make it to the next tier. The logic 
 might be a little flawed here but points to the right direction.
 
+(might introduce elo score?)
+
 Lots of new benchmarks can be added besides the winrate against a random agent. For example,
 we can test the agent's use of spells by placing swarm units at the bridge. By placing a
 mini pekka behind a giant we test the agent's ability of defending. 
