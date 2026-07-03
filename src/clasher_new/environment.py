@@ -63,7 +63,7 @@ class CREnv(gym.Env):
         p1 = self.battle.players[1]
         if slot != 0:
             card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, Position((17-x)+0.5, (31-y)+0.5))
+            self.battle.deploy_card(1, card_name, Position(18-(x+0.5), 32-(y+0.5)))
             # Yes, this transformation seems weird, but it should be correct
 
 
