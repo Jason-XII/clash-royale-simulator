@@ -1,5 +1,7 @@
 # Clash Royale Simulator 
 
+项目完整介绍视频：https://www.bilibili.com/video/BV1n3uZ6WE5P/
+
 Finally! A Clash Royale bot training environment that's playable, actively maintained and has a RL interface.
 
 I like clash royale and want to train a RL agent to play the game. 
