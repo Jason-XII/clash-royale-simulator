@@ -99,6 +99,11 @@ class Entity:
                 self.battle_state.deal_area_damage(self.player, self.position, 1.0+self.data.collision_radius, self.data.death_damage,
                                                    attack_air=True, attack_ground=True)
 
+    def in_attack_range(self, target):
+        return self.position.distance_to(target.position) <= self.data.range + target.data.collision_radius
+    def in_sight_range(self, target):
+        return self.position.distance_to(target.position) <= self.data.sight_range + target.data.collision_radius
+
     def get_nearest_target(self):
         """Find nearest valid target with priority rules"""
         building_targets = []
@@ -110,9 +115,7 @@ class Entity:
             distance = self.position.distance_to(entity.position)
             if (entity.data.is_air_unit and not self.data.attack_air) or ((not entity.data.is_air_unit) and not self.data.attack_ground):
                 continue
-
-            # Might change later: how to determine a target is in sight range, given the collision radius?
-            if distance-entity.data.collision_radius <= self.data.sight_range:
+            if self.in_sight_range(entity):
                 if isinstance(entity, Building):
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
@@ -334,83 +337,28 @@ class Troop(Entity):
             self.data.is_air_unit = Card(self.name).is_air_unit
             self.speed = self.data.speed
         current_target = self.update_current_target()
+        # After the modification, we always have a target, sometimes it's in sight range, sometimes it's not
+        # We use A* search for all cases to pathfind towards the target.
+        # The case is even the same with ground troops and air troops.
 
-        if current_target:
-            # Move towards target if out of attack range
-            distance = self.position.distance_to(current_target.position)
-            if distance > (self.data.range + current_target.data.collision_radius) or self.jumping_across_river:
-                has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river()
-                if self.data.is_air_unit or has_jump_ability:
-                    pathfind_target = current_target.position
-                else:
-                    pathfind_target = self._get_pathfind_target(current_target)
-                if not self.jumping_across_river and has_jump_ability:
-                    self.start_jumping_position = Position(self.position.x, self.position.y)
-                    self.jumping_across_river = True
-                    self.data.is_air_unit = True
-                    self.speed = self.data.jump_speed
-                self.move_towards(pathfind_target, dt)
-                self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
-            else:
-                if self.attack_cooldown <= 0:
-                    self.entity_holder.on_attack(current_target)
-                else:
-                    self.attack_cooldown -= dt*self.speed_buff*self.speed_debuff
+        # Move towards target if out of attack range
+        distance = self.position.distance_to(current_target.position)
+        if distance > (self.data.range + current_target.data.collision_radius) or self.jumping_across_river:
+            has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river()
+            if not self.jumping_across_river and has_jump_ability:
+                self.start_jumping_position = Position(self.position.x, self.position.y)
+                self.jumping_across_river = True
+                self.data.is_air_unit = True
+                self.speed = self.data.jump_speed
+            path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+            self.move_towards(path[1], dt, True)
+            self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
-            # now calculate:
-            if self.data.is_air_unit:
-                self.move_towards(self._get_basic_pathfind_target(), dt)
-                return
-            near_left = abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
-            before_bridge = (self.position.y < 15.0 and self.player == 0) or (
-                        self.position.y > 17.0 and self.player == 1)
-            if near_left and before_bridge and self.player == 0:
-                if 2.5 <= self.position.x <= 4.5:
-                    dx = 0
-                elif self.position.x < 2.5:
-                    dx = 2.5-self.position.x
-                else:
-                    dx = 4.5-self.position.x
-                dy = 15.0-self.position.y
-            elif not near_left and before_bridge and self.player == 0:
-                if 13.5 <= self.position.x <= 15.5:
-                    dx = 0
-                elif self.position.x < 13.5:
-                    dx = 13.5-self.position.x
-                else:
-                    dx = 15.5-self.position.x
-                dy = 15.0-self.position.y
-            elif self.player == 0:
-                self.move_towards(self._get_basic_pathfind_target(), dt)
-                return
-            elif near_left and before_bridge and self.player == 1:
-                if 2.5 <= self.position.x <= 4.5:
-                    dx = 0
-                elif self.position.x < 2.5:
-                    dx = 2.5-self.position.x
-                else:
-                    dx = 4.5-self.position.x
-                dy = 17.0-self.position.y
-            elif not near_left and before_bridge and self.player == 1:
-                if 13.5 <= self.position.x <= 15.5:
-                    dx = 0
-                elif self.position.x < 13.5:
-                    dx = 13.5 - self.position.x
-                else:
-                    dx = 15.5 - self.position.x
-                dy = 17.0 - self.position.y
+            if self.attack_cooldown <= 0:
+                self.entity_holder.on_attack(current_target)
             else:
-                self.move_towards(self._get_basic_pathfind_target(), dt)
-                return
-            distance = dt * self.speed
-            dx = (dx/math.hypot(dx, dy))*distance
-            dy = (dy/math.hypot(dx, dy))*distance
-            real_dx = (1 if dx > 0 else -1 if dx < 0 else 0) * distance / math.sqrt(2)
-            real_dy = (1 if dy > 0 else -1 if dy < 0 else 0) * distance / math.sqrt(2)
-            if not self.path_blocked_counter:
-                self.move_towards(Position(self.position.x + real_dx, self.position.y + real_dy), dt, can_overshoot=True)
-            else:
-                self.move_towards(Position(self.position.x + dx, self.position.y + dy), dt, can_overshoot=True)
+                self.attack_cooldown -= dt*self.speed_buff*self.speed_debuff
+
 
 
 class Building(Entity):
@@ -448,7 +396,7 @@ class Building(Entity):
         if self.attack_cooldown > 0:
             self.attack_cooldown = max(0, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         target = self.update_current_target()
-        if target and self.attack_cooldown <= 0:
+        if target and self.in_attack_range(target) and self.attack_cooldown <= 0:
             if self.data.projectiles:
                 self.create_projectile(target)
             else:

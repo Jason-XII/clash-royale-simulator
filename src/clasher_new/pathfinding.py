@@ -48,7 +48,7 @@ class EntityPathfinder:
         self.goals = set()
         lane_id = '2' if self.start_cell[0] >= 19 else '1'
 
-        radius = self.target.data.collision_radius + self.entity.data.range - 0.1
+        radius = self.target.data.collision_radius + self.entity.data.range - 0.5
         minimum_angle = (15/360)*2*math.pi
         tx, ty = self.target_position.x, self.target_position.y
         for i in range(24):
@@ -81,7 +81,7 @@ class EntityPathfinder:
                 px, py = current
                 tile_char = contents[63-ny][nx]
                 if tile_char == 'W':
-                    tile_cost = 800
+                    tile_cost = 800 if not self.entity.data.is_air_unit else 20
                 elif tile_char == '.':
                     tile_cost = 20
                 elif tile_char != lane_id:
@@ -104,7 +104,8 @@ class EntityPathfinder:
             path.append(parent[path[-1]])
         path.reverse()
 
-        return path
+        positions = [cell_to_position(each) for each in path]
+        return positions
 
 if __name__ == '__main__':
     from battle import BattleState
