@@ -1,5 +1,6 @@
 from core import BlankEntity
 from player import PlayerState
+from pathfinding import EntityPathfinder
 from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
 import math
@@ -144,6 +145,7 @@ class Entity:
         return False
 
     def update_current_target(self):
+        # If target is killed or no longer in sight, update the target_id to None
         current_target = None
         if self.target_id is None or \
                 self.target_id not in self.battle_state.entities or \
@@ -163,6 +165,21 @@ class Entity:
         else:
             current_target = best_target
             self.target_id = current_target.id if current_target else None
+
+        # Now, the current target can still be None (example: a knight deployed at the back)
+        # This case we update the target to the nearest enemy princess tower, so we can do A* globally!
+        if self.target_id is None:
+            min_distance = float('inf')
+            self.target_id = 1
+            for i in range(1, 7):
+                if i not in self.battle_state.entities: continue
+                possible_princess_tower = self.battle_state.entities[i]
+                if possible_princess_tower.player == self.player: continue
+                distance = possible_princess_tower.position.distance_to(self.position) - possible_princess_tower.data.collision_radius
+                if distance < min_distance:
+                    min_distance = distance
+                    self.target_id = i
+            current_target = self.battle_state.entities[self.target_id]
         return current_target
 
     def create_projectile(self, target):
