@@ -81,13 +81,11 @@ class EntityPathfinder:
                 px, py = current
                 tile_char = contents[63-ny][nx]
                 if tile_char == 'W':
-                    tile_cost = 800 if not self.entity.data.is_air_unit else 20
+                    tile_cost = 800 if not self.entity.data.is_air_unit else 7
                 elif tile_char == '.':
-                    tile_cost = 20
-                elif tile_char != lane_id:
-                    tile_cost = 5
+                    tile_cost = 8
                 else:
-                    tile_cost = 1
+                    tile_cost = 5
                 if nx != px and ny != py:
                     geo_cost = 14
                 else:
@@ -114,10 +112,10 @@ if __name__ == '__main__':
     player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
     player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
     battle = BattleState(PlayerState(0, player_0_deck, 10), PlayerState(1, player_1_deck, 10))
-    battle.deploy_card(0, 'Knight', Position(9.5, 0.5))
+    battle.deploy_card(0, 'Knight', Position(10.5, 10.5))
 
     pathfind = EntityPathfinder(battle.entities[7], battle.entities[2], battle)
-    pathfind.calculate()
+    print(pathfind.calculate())
 
 
 
