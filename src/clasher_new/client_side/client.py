@@ -9,7 +9,7 @@ from player import PlayerState
 import os
 font_path = os.path.join(os.path.dirname(pygame.__file__), "freesansbold.ttf")
 
-DEBUG = False
+DEBUG = True
 
 # --- Config ---
 CARDS = [
@@ -117,7 +117,7 @@ else:
 if not DEBUG:
     server_ip = ip_input_screen()
 else:
-    server_ip = "100.64.167.179"
+    server_ip = "192.168.0.103"
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect((server_ip, PORT))

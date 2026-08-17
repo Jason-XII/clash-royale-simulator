@@ -46,16 +46,20 @@ class EntityPathfinder:
 
     def calculate(self):
         self.goals = set()
-        lane_id = '2' if self.start_cell[0] >= 19 else '1'
 
-        radius = self.target.data.collision_radius + self.entity.data.range - 0.5
-        minimum_angle = (15/360)*2*math.pi
-        tx, ty = self.target_position.x, self.target_position.y
-        for i in range(24):
-            dx, dy = radius*math.cos(i*minimum_angle), radius*math.sin(i*minimum_angle)
-            new_position = Position(tx+dx, ty+dy)
-            if self.battle.ground_walkable(new_position, self.entity.data.collision_radius):
-                self.goals.add(position_to_cell(new_position))
+        radius = self.target.data.collision_radius + self.entity.data.range
+        # The first step is to calculate some viable cells that is in attack position.
+
+        target_cell = position_to_cell(self.target_position)
+        scan_radius = math.ceil(radius*2) + 1
+        for x in range(target_cell[0]-scan_radius, target_cell[0]+scan_radius):
+            for y in range(target_cell[1]-scan_radius, target_cell[1]+scan_radius):
+                distance = cell_to_position((x, y)).distance_to(self.target_position)
+                # I added 0.375 to radius so that short-ranged troops like lumberjack can reach the tower instead of leering to the side
+                if distance < radius+0.375 and self.battle.ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
+                    self.goals.add((x, y))
+        # The second step is to filter goals, only keep the closest one.
+        self.goals = {min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.start_position))}
 
         g = {}
         f = {}
@@ -68,7 +72,6 @@ class EntityPathfinder:
         while open_set:
             current = min(open_set, key=lambda node: f[node])
             if current in self.goals:
-                print('Reached goal.')
                 break
             open_set.remove(current)
             closed_set.add(current)

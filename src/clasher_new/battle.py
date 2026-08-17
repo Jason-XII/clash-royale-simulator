@@ -351,8 +351,10 @@ class Troop(Entity):
                 self.data.is_air_unit = True
                 self.speed = self.data.jump_speed
             path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-            print(path)
-            self.move_towards(path[1], dt, False)
+            if len(path) <= 1:
+                self.move_towards(current_target.position, dt, True)
+            else:
+                self.move_towards(path[1], dt, True)
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:
