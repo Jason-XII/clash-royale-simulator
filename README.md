@@ -53,9 +53,8 @@ You can see elixir, drag and drop to deploy cards, see entities on the screen, e
 
 I have implemented 47 cards in total, no evolutions, hero or champion cards are
 implemented yet. The simulator's behavior is not *completely* consistent with real gameplay
-and I'm continuously trying to improve this. For example, the path finding algorithm 
-uses a non-search approach, which is faster but makes the characters slightly slower 
-when walking. This might be solved in the future though.
+and I'm continuously trying to improve this. I recently updated the pathfinding algorithm to
+A* search, although somewhat closer to real gameplay, there are still small inconsistencies. 
 
 Complete list of implemented cards:
 

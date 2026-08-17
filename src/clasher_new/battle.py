@@ -230,93 +230,8 @@ class Troop(Entity):
         else:
             move_distance = self.speed * dt * self.speed_buff * self.speed_debuff
         move_x, move_y = (dx / distance) * move_distance, (dy / distance) * move_distance
-        # Check if the new position would be walkable (for ground units)
-        new_position = Position(self.position.x + move_x, self.position.y + move_y)
-
-        # Air units ignore walkability checks, ground units must check
-        if self.data.is_air_unit or (self.battle_state.ground_walkable(new_position, self.data.collision_radius)):
-            self.position.x += move_x
-            self.position.y += move_y
-            self.path_blocked_counter -= 1 if self.path_blocked_counter else 0
-        else:
-            # If direct path is blocked, try to find a way around
-            self.path_blocked_counter += 1 if self.path_blocked_counter < 1 else 0
-            original_angle = math.atan2(move_y, move_x)
-            move_distance = math.hypot(move_x, move_y)
-            angle_offsets = [i * math.pi / 16 for i in range(1, 9)] + [-i * math.pi / 16 for i in range(1, 9)]
-            for angle_offset in angle_offsets:
-                new_angle = original_angle + angle_offset
-                new_move_x = math.cos(new_angle) * move_distance * 1.5
-                new_move_y = math.sin(new_angle) * move_distance * 1.5
-                if self.battle_state.ground_walkable(Position(self.position.x+new_move_x, self.position.y+new_move_y),
-                                                self.data.collision_radius):
-                    # print('Preparing to move to:', self.position.x+new_move_x, self.position.y+new_move_y)
-                    if new_move_x*move_x+new_move_y*move_y >= -0.000001:
-                        self.position.x += new_move_x
-                        self.position.y += new_move_y
-                        break
-                    else:
-                        print('Failed', self.name, new_move_x*move_x+new_move_y*move_y)
-                        pass
-
-    def _get_pathfind_target(self, target_entity: 'Entity') -> Position:
-        """Get pathfinding target using priority system with advanced post-tower-destruction logic:
-        Air units: 1) Targets in FOV, 2) Towers (fly directly over river)
-        Ground units:
-        - Before first tower destroyed: 1) Troops in sight range, 2) Bridge center, 3) Princess towers
-        - After first tower destroyed: 1) Troops in FOV, 2) Center bridge, 3) Cross bridge if clear, 4) Target buildings
-        """
-        final_target = target_entity.position
-        need_to_cross = (self.position.y - 16.0) * (final_target.y - 16.0) < 0
-        if self.data.is_air_unit or not need_to_cross:
-            return final_target
-        return self._get_basic_pathfind_target()
-
-    def _get_basic_pathfind_target(self) -> Position:
-        """If no target in sight, where should the troop walk to? """
-        near_left =  abs(self.position.x - 3.5) < abs(self.position.x - 14.5)
-        on_bridge = (abs(self.position.x - (3.5 if near_left else 14.5)) <= 1.5 and
-                    abs(self.position.y - 16.0) <= 1.5)
-        before_bridge = (self.position.y < 15.0 and self.player==0) or (self.position.y > 17.0 and self.player==1)
-        if self.data.is_air_unit:
-            if self.player == 0:
-                return TileGrid.RED_LEFT_TOWER if near_left else TileGrid.RED_RIGHT_TOWER
-            else:
-                return TileGrid.BLUE_LEFT_TOWER if near_left else TileGrid.BLUE_RIGHT_TOWER
-        if before_bridge and not on_bridge:
-            possible_x = [3, 14]
-            possible_y = [15, 17]
-            return Position(min(possible_x, key=lambda x: abs(self.position.x - x)),
-                            min(possible_y, key=lambda y: abs(self.position.y - y)))
-        else:
-            if self.player == 0:
-                if near_left:
-                    if self.position.y > 15.5:
-                        target = TileGrid.RED_LEFT_TOWER
-                    else:
-                        target = Position(3.5, 16.0)
-                else:
-                    if self.position.y > 15.5:
-                        target = TileGrid.RED_RIGHT_TOWER
-                    else:
-                        target = Position(14.5, 16.0)
-                if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y >= 25.0:
-                    target = TileGrid.RED_KING_TOWER
-                return target
-            else:
-                if near_left:
-                    if self.position.y < 16.5:
-                        target = TileGrid.BLUE_LEFT_TOWER
-                    else:
-                        target = Position(3.5, 16.0)
-                else:
-                    if self.position.y < 16.5:
-                        target = TileGrid.BLUE_RIGHT_TOWER
-                    else:
-                        target = Position(14.5, 16.0)
-                if self.battle_state.ground_walkable(target, self.data.collision_radius) and self.position.y <= 7.0:
-                    target = TileGrid.BLUE_KING_TOWER
-                return target
+        self.position.x += move_x
+        self.position.y += move_y
 
     def update(self, dt):
         if not self.is_alive: return
@@ -344,7 +259,7 @@ class Troop(Entity):
         # Move towards target if out of attack range
         distance = self.position.distance_to(current_target.position)
         if distance > (self.data.range + current_target.data.collision_radius) or self.jumping_across_river:
-            has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river()
+            has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river() and self.in_sight_range(current_target)
             if not self.jumping_across_river and has_jump_ability:
                 self.start_jumping_position = Position(self.position.x, self.position.y)
                 self.jumping_across_river = True
