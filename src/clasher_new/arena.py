@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from core import Position
+import math
 
 walkable_cache = {}
 
@@ -81,7 +82,7 @@ class TileGrid:
                     continue
             dx = abs(pos.x - tower_pos.x)
             dy = abs(pos.y - tower_pos.y)
-            if dx <= radius and dy <= radius:
+            if math.hypot(dx, dy) <= radius:
                 return True
 
         return False

@@ -38,7 +38,7 @@ king_tower_stats = {
         'damage': 109,
         'sightRange': 7000,
         'range': 7000,
-        'collisionRadius': 2000,
+        'collisionRadius': 1400,
         'tidTarget': 'TID_TARGETS_AIR_AND_GROUND',
         'deployTime': 3300,
         'loadTime': 700,
@@ -69,7 +69,7 @@ class Card:
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1000) / 1000
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed', 0) / 1000
         self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
-        self.speed = self.data['summonCharacterData'].get('speed', 0)/60
+        self.speed = self.data['summonCharacterData'].get('speed', 0)/50
         self.target_only_buildings = self.data['summonCharacterData'].get('tidTarget', '') == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units or self.data['summonCharacterData'].get('name', '') in air_units
         self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
@@ -103,9 +103,6 @@ class Card:
 
         self.type = self.data.get('tidType', '').split('_')[-1].lower()
         self.rarity = self.data.get('rarity', 'Common')
-
-        if self.name == 'King_PrincessTowers':
-            self.collision_radius = 1.5
 
         self.set_level(11)
 

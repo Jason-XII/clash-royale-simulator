@@ -118,7 +118,7 @@ if __name__ == '__main__':
     player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
     player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
     battle = BattleState(PlayerState(0, player_0_deck, 10), PlayerState(1, player_1_deck, 10))
-    battle.deploy_card(0, 'Knight', Position(10.5, 10.5))
+    battle.deploy_card(0, 'Knight', Position(9.5, 0.5))
 
     pathfind = EntityPathfinder(battle.entities[7], battle.entities[2], battle)
     print(pathfind.calculate())
