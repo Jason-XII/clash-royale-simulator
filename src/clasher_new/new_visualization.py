@@ -103,7 +103,7 @@ class Visualizer:
     def run(self):
         while self.running:
             self.process_events()
-            dt = self.clock.tick(20) / 1000.0
+            dt = self.clock.tick(60) / 1000.0
             if not self.paused and not self.battle.game_over:
                 for _ in range(self.speed):
                     self.battle.step(dt)

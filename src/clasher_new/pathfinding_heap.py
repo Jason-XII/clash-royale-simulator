@@ -8,6 +8,7 @@ with grid_path.open('r') as f:
     contents = [list(each) for each in f.read().splitlines()]
 
 cell_cache = {}
+neighbor_cache = {}
 
 def position_to_cell(position: Position):
     x, y = position.x, position.y
@@ -19,16 +20,17 @@ def cell_to_position(cell):
         cell_cache[cell] = Position((x+0.5)/2, (y+0.5)/2)
     return cell_cache[cell]
 
-def heuristic(current, goal):
-    return 10 * max(abs(current.x - goal.x), abs(current.y - goal.y))
-
 def get_neighboring_points(x, y):
+    if (x, y) in neighbor_cache: return neighbor_cache[(x,y)]
+    result = []
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             new_x, new_y = x+dx, y+dy
             if dx == dy == 0: continue
             if new_x < 0 or new_y < 0 or new_x >= 36 or new_y >= 64: continue
-            yield new_x, new_y
+            result.append((new_x, new_y))
+    neighbor_cache[(x,y)] = result
+    return result
 
 
 class EntityPathfinder:
@@ -43,10 +45,8 @@ class EntityPathfinder:
 
     def heuristic(self, cell):
         x, y = cell
-        return min(
-            10 * max(abs(x - gx), abs(y - gy))
-            for gx, gy in self.goals
-        )
+        gx, gy = self.goal
+        return 10 * max(abs(x - gx), abs(y - gy))
 
     def calculate(self):
         self.goals = set()
@@ -63,7 +63,7 @@ class EntityPathfinder:
                 if distance < radius+0.375 and self.battle.ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
                     self.goals.add((x, y))
         # The second step is to filter goals, only keep the closest one.
-        self.goals = {min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.start_position))}
+        self.goal = min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.start_position))
 
         g = {}
         f = {}
@@ -79,7 +79,7 @@ class EntityPathfinder:
                 continue
             if current_f > f[current]:
                 continue
-            if current in self.goals:
+            if current == self.goal:
                 break
             closed_set.add(current)
             for neighbor in get_neighboring_points(current[0], current[1]):

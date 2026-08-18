@@ -266,8 +266,11 @@ class Troop(Entity):
                 self.jumping_across_river = True
                 self.data.is_air_unit = True
                 self.speed = self.data.jump_speed
-            if (not self.path) or (self.in_sight_range(current_target)):
+            if not self.path:
                 self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+            elif self.in_sight_range(current_target) and self.battle_state.tick % 3 == 0:
+                self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+
             # determine the next waypoint and move towards that waypoint
             min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
             index = self.path.index(min_point)
@@ -646,7 +649,8 @@ class BattleState:
     def is_position_occupied_by_building(self, position, mover_radius: float = 0.5) -> bool:
         """Return True when a position overlaps any live building footprint."""
         for x,y,r in self.building_positions:
-            if math.hypot(abs(x-position.x), abs(y-position.y)) < (r + mover_radius):
+            # I choose not to use math.hypot to speed things up. This functino gets called several millions times per game
+            if (x-position.x)**2+ (y-position.y)**2 < (r + mover_radius)**2:
                 return True
         return False
 
