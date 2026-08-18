@@ -62,7 +62,7 @@ class EntityPathfinder:
                 if distance < radius+0.375 and self.battle.ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
                     self.goals.add((x, y))
         # The second step is to filter goals, only keep the closest one.
-        self.goals = {min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.start_position))}
+        self.goals = {min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.target_position))}
 
         g = {}
         f = {}
