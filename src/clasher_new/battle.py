@@ -1,6 +1,6 @@
 from core import BlankEntity
 from player import PlayerState
-from pathfinding import EntityPathfinder
+from pathfinding_heap import EntityPathfinder
 from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
 import math

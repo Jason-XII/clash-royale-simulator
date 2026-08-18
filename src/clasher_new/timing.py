@@ -11,7 +11,7 @@ if __name__ == '__main__':
     env = make_env()
     t0 = time.time()
     t_irl = 0
-    for i in range(1):
+    for i in range(10):
         state, _ = env.reset()
         running = True
         # model = PPO('MultiInputPolicy', env, policy_kwargs={"features_extractor_class": CRFeatureExtractor},

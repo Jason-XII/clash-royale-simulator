@@ -29,13 +29,17 @@ class SequentialEvalEnv(CREnv):
 
 
 
-env = SequentialEvalEnv(start_deck=['Knight', 'MiniPekka', 'Arrows', 'Giant', 'Musketeer', 'Fireball', 'Minions', 'Archer'],
-                        events=[('Giant', 3, 13, 0.5),
-                                ('MiniPekka', 3, 12, 0.5)],
-                        visualize=True, speed=1)
-model = PPO.load("cr_logs/cr_5261472_steps.zip", env=env)
+# env = SequentialEvalEnv(start_deck=['Knight', 'MiniPekka', 'Arrows', 'Giant', 'Musketeer', 'Fireball', 'Minions', 'Archer'],
+#                         events=[('Giant', 3, 13, 0.5),
+#                                 ('MiniPekka', 3, 12, 0.5)],
+#                         visualize=True, speed=1)
 
-wins = 0
+
+model = PPO.load("cr_logs/cr_1660000_steps.zip")
+env = CREnv(opponent_model=lambda x: model.predict(x)[0], visualize=True)
+
+
+lost_hp = 0
 for i in range(1):
     obs, _ = env.reset()
     done = False
@@ -46,6 +50,8 @@ for i in range(1):
         # print(reward)
         done = termination or truncation
         total_reward += reward
-    wins += env.battle.winner == 0
-    print(total_reward, env.battle.winner == 0)
-print('Won', wins, 'out of 100 games.')
+
+    p0 = env.battle.players[0]
+    lost_hp += 3052-max(p0.right_tower_hp, 0) + 4824-max(p0.king_tower_hp, 0)
+
+print('Average lost hp: ', lost_hp/100)
