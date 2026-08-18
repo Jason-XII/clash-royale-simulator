@@ -47,6 +47,8 @@ class Entity:
             self.entity_holder = eval(f"{self.card_name}(self)")
         self.entity_holder.on_spawn()
 
+        self.path = []
+
     def to_dict(self):
         """If I want to render a certain entity on the screen, what's the minimal information I'll need?"""
         return {
@@ -157,7 +159,7 @@ class Entity:
             self.target_id = None
         else:
             current_target = self.battle_state.entities.get(self.target_id)
-            if current_target.position.distance_to(self.position) - current_target.data.collision_radius > self.data.sight_range:
+            if not self.in_sight_range(current_target):
                 current_target = None
                 self.target_id = None
         best_target = self.get_nearest_target()
@@ -215,7 +217,6 @@ class Troop(Entity):
         self.start_jumping_position = None
         self.spawned = False
 
-
     def to_dict(self):
         d = super().to_dict()
         d.update({'type': 'troop', })
@@ -265,11 +266,21 @@ class Troop(Entity):
                 self.jumping_across_river = True
                 self.data.is_air_unit = True
                 self.speed = self.data.jump_speed
-            path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-            if len(path) <= 1:
+            if not self.path or not self.in_sight_range(current_target):
+                self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+            # determine the next waypoint and move towards that waypoint
+            min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
+            index = self.path.index(min_point)
+            start_vector = (self.position.x-self.path[0].x, self.position.y-self.path[0].y)
+            close_vector = (self.position.x-min_point.x, self.position.y-min_point.y)
+            dot = start_vector[0]*close_vector[0] + start_vector[1]*close_vector[1]
+            if dot >= 0:
+                # move towards next waypoint
+                index += 1
+            if index == len(self.path):
                 self.move_towards(current_target.position, dt, True)
             else:
-                self.move_towards(path[1], dt, True)
+                self.move_towards(self.path[index], dt, True)
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:
