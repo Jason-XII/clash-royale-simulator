@@ -489,6 +489,7 @@ class BattleState:
         self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', True))
 
         self.schedule = []
+        self.building_positions = []
 
     def in_river(self, position):
         river_tiles = [(0, 15), (0, 16), (1, 15), (1, 16),
@@ -580,7 +581,8 @@ class BattleState:
                 self.winner = 1
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
-        self.entities = {key:value for key,value in self.entities.items() if value.is_alive}
+        self.entities = {key:value for key,value in self.entities.items() if (value.is_alive or key <= 6)}
+        self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building)]
         for entity in list(self.entities.values()):
             entity.update(dt)
             self.ensure_walkability(entity)
@@ -643,10 +645,8 @@ class BattleState:
 
     def is_position_occupied_by_building(self, position, mover_radius: float = 0.5) -> bool:
         """Return True when a position overlaps any live building footprint."""
-        for entity in self.entities.values():
-            if not isinstance(entity, Building) or not entity.is_alive:
-                continue
-            if position.distance_to(entity.position) < (entity.data.collision_radius + mover_radius):
+        for x,y,r in self.building_positions:
+            if math.hypot(abs(x-position.x), abs(y-position.y)) < (r + mover_radius):
                 return True
         return False
 
