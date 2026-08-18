@@ -6,14 +6,17 @@ grid_path = Path(__file__).with_name('tilemap_lane_grid.txt')
 with grid_path.open('r') as f:
     contents = [list(each) for each in f.read().splitlines()]
 
+cell_cache = {}
 
 def position_to_cell(position: Position):
     x, y = position.x, position.y
     return math.floor(2*x), math.floor(2*y)
 
 def cell_to_position(cell):
-    x, y = cell
-    return Position((x+0.5)/2, (y+0.5)/2)
+    if cell not in cell_cache:
+        x, y = cell
+        cell_cache[cell] = Position((x+0.5)/2, (y+0.5)/2)
+    return cell_cache[cell]
 
 def heuristic(current, goal):
     return 10 * max(abs(current.x - goal.x), abs(current.y - goal.y))

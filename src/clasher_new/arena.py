@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from core import Position
 
+walkable_cache = {}
 
 @dataclass
 class TileGrid:
@@ -46,13 +47,19 @@ class TileGrid:
         return (x, y) in self.BLOCKED_TILES
     
     def is_walkable(self, pos: Position) -> bool:
-        if not self.is_valid_position(pos): return False
-        if self.is_blocked_tile(int(pos.x), int(pos.y)): return False
-        if self.RIVER_Y1 <= pos.y <= self.RIVER_Y2:
+        x, y = pos.x, pos.y
+        int_pos = (int(x), int(y))
+        if int_pos in walkable_cache:
+            return walkable_cache[int_pos]
+        if not self.is_valid_position(pos) or self.is_blocked_tile(int(pos.x), int(pos.y)):
+            walkable_cache[int_pos] = False
+        elif self.RIVER_Y1 <= pos.y <= self.RIVER_Y2:
             on_left_bridge = 2.0 <= pos.x < 5.0
             on_right_bridge = 13.0 <= pos.x < 16.0
-            return on_left_bridge or on_right_bridge
-        return True
+            walkable_cache[int_pos] = on_left_bridge or on_right_bridge
+        else:
+            walkable_cache[int_pos] = True
+        return walkable_cache[int_pos]
 
     def _is_tower_alive(self, tower_pos: Position, player_id: int, battle_state) -> bool:
         """Check if tower at given position is still alive"""

@@ -18,7 +18,7 @@ if __name__ == '__main__':
         #             verbose=1, tensorboard_log="./cr_logs")
         # model.save('cr_discrete')
         while running:
-            print(time.time() -t0)
+            # print(time.time() -t0)
             state, reward, termination, truncation, info = env.step(random_strategy(state))
             running = not (termination or truncation)
         print('game')
