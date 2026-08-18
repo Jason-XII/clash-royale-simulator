@@ -2,7 +2,7 @@
 
 项目完整介绍视频：https://www.bilibili.com/video/BV1n3uZ6WE5P/
 
-> 注意：我最近在对本仓库的寻路机制做大幅改动，因为A*算法实现起来非常复杂，所以会出很多bug。如果你运行本仓库的代码发现效果不及预期，可以考虑滚回7月的版本。
+> 注意：我最近对本仓库的寻路机制做了大幅改动，使用了更加贴合原版的A*算法，但是没有做速度上的优化。如果你运行本仓库的代码发现效果不及预期，可以考虑滚回7月的版本。
 
 Finally! A Clash Royale bot training environment that's playable, actively maintained and has a RL interface.
 
