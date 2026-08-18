@@ -266,7 +266,7 @@ class Troop(Entity):
                 self.jumping_across_river = True
                 self.data.is_air_unit = True
                 self.speed = self.data.jump_speed
-            if not self.path or not self.in_sight_range(current_target):
+            if (not self.path) or (self.in_sight_range(current_target)):
                 self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
             # determine the next waypoint and move towards that waypoint
             min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
@@ -580,6 +580,7 @@ class BattleState:
                 self.winner = 1
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
+        self.entities = {key:value for key,value in self.entities.items() if value.is_alive}
         for entity in list(self.entities.values()):
             entity.update(dt)
             self.ensure_walkability(entity)

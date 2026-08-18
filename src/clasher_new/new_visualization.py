@@ -103,7 +103,7 @@ class Visualizer:
     def run(self):
         while self.running:
             self.process_events()
-            dt = self.clock.tick(60) / 1000.0
+            dt = self.clock.tick(20) / 1000.0
             if not self.paused and not self.battle.game_over:
                 for _ in range(self.speed):
                     self.battle.step(dt)
@@ -115,7 +115,7 @@ class Visualizer:
             self.render_frame()
         pygame.quit()
 
-player_0_deck = ['Knight', 'Prince', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
+player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
 
 schedule = [('Knight', (9.5, 0.5), 0, 0),
@@ -131,6 +131,6 @@ schedule2 = [('Prince', (10.5, 10.5), 0, 0)]
 
 if __name__ == "__main__":
     v = Visualizer()
-    for each in schedule2:
+    for each in schedule:
         v.deploy(*each)
     v.run()
