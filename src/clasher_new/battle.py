@@ -319,8 +319,8 @@ class Building(Entity):
         d.update({'type': 'building'})
         return d
 
-    def take_damage(self, amount: float):
-        super().take_damage(amount)
+    def take_damage(self, amount: float, delayed=False):
+        super().take_damage(amount, delayed)
         if self.data.name == 'KingTower' and not self.tower_active:
             self.tower_active = True
 
@@ -383,7 +383,7 @@ class Projectile(Entity):
                 if each in self.damage_dealt or each.data.is_air_unit: continue
                 if not each.is_alive or each.player == self.player: continue
                 if each.position.distance_to(self.position) < each.data.collision_radius + self.proj.radius:
-                    each.take_damage(self.proj.damage)
+                    each.take_damage(self.proj.damage, delayed=True)
                     self.damage_dealt.append(each)
                     # now knockback
                     direction_vector = complex(each.position.x-self.position.x, each.position.y-self.position.y)
