@@ -16,7 +16,7 @@ class Entity:
 
         # Stores state information that is likely to change.
         self.is_alive = True
-        self.attack_cooldown = self.data.load_time
+        self.attack_cooldown = self.data.hit_speed-self.data.load_time
         self.speed = self.data.speed
         self.hp = self.data.hp
         self.shield_health = self.data.shield_health
@@ -48,6 +48,8 @@ class Entity:
         self.entity_holder.on_spawn()
 
         self.path = []
+
+        self.pending_damage = []
 
     def to_dict(self):
         """If I want to render a certain entity on the screen, what's the minimal information I'll need?"""
@@ -86,9 +88,18 @@ class Entity:
         else:
             self.speed_debuff = 1.0
 
-    def take_damage(self, amount: float):
+        for pending_damage in self.pending_damage:
+            self.take_damage(pending_damage, delayed=False)
+        self.pending_damage = []
+
+
+
+    def take_damage(self, amount: float, delayed=False):
         """Apply damage to entity"""
         if self.invincible: return
+        if delayed:
+            self.pending_damage.append(amount)
+            return
         if not self.shield_health: self.hp -= amount
         else: self.shield_health = max(0, self.shield_health - amount)
 

@@ -29,9 +29,9 @@ class BasicCharacter:
                                                    self.data.attack_air, self.data.attack_ground)
             else:
                 if 'King' in current_target.name:
-                    current_target.take_damage(self.data.damage*self.entity.data.tower_damage_mult)
+                    current_target.take_damage(self.data.damage*self.entity.data.tower_damage_mult, delayed=True)
                 else:
-                    current_target.take_damage(self.data.damage)
+                    current_target.take_damage(self.data.damage, delayed=True)
         elif self.entity.data.projectiles:
             # must have projectiles
             self.entity.create_projectile(current_target)

@@ -50,8 +50,6 @@ class Visualizer:
     def draw_entities(self):
         for e in self.battle.entities.values():
             if not e.is_alive: continue
-            if e.name == 'Knight':
-                print(e.position.x, e.position.y)
             sx, sy = w2s(e.position.x, e.position.y)
             color = BLUE if e.player == 0 else RED
             r = int(e.data.collision_radius * TILE)
@@ -117,7 +115,7 @@ class Visualizer:
             self.render_frame()
         pygame.quit()
 
-player_0_deck = ['Knight', 'Arrows', 'Minions', 'Musketeer', 'MiniPekka', 'Fireball', 'Giant', 'Archer']
+player_0_deck = ['Knight', 'MiniPekka', 'Minions', 'Musketeer', 'Arrows', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
 
 schedule = [('Knight', (9.5, 0.5), 0, 0),
@@ -128,7 +126,8 @@ schedule = [('Knight', (9.5, 0.5), 0, 0),
             ('MiniPekka', (14.5, 20.5), 1, 18.936),
             ('MiniPekka', (14.5, 14.5), 0, 19.436)]
 
-schedule2 = [('Knight', (9.5, 1.0), 0, 0)]
+schedule2 = [('MiniPekka', (10.5, 10.5), 0, 0),
+             ('MiniPekka', (10.5, 20.5), 1, 0)]
 
 
 if __name__ == "__main__":

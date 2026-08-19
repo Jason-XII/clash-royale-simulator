@@ -2,11 +2,9 @@
 
 项目完整介绍视频：https://www.bilibili.com/video/BV1n3uZ6WE5P/
 
-> 注意：我最近对本仓库的寻路机制做了大幅改动，使用了更加贴合原版的A*算法，但是没有做速度上的优化。如果你运行本仓库的代码发现效果不及预期，可以考虑滚回7月的版本。
+This project simulates a Clash-Royale like environment and provides a reinforcement learning interface for agent training.
 
-Finally! A Clash Royale bot training environment that's playable, actively maintained and has a RL interface.
-
-I like clash royale and want to train a RL agent to play the game. 
+Why I created this repository: I like clash royale and want to train a RL agent to play the game. 
 However, a simulator is needed to speed up training. I searched on GitHub and the only usable project I found
 was samdickson22's [repository](https://github.com/samdickson22/clash-simulator). I noticed that the code is almost completely written by AI, which is hard to read and impossible for humans to make improvements on the code.
 
