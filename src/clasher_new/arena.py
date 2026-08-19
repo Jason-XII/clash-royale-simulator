@@ -34,12 +34,12 @@ class TileGrid:
     ]
 
     towers = [
-        (BLUE_LEFT_TOWER, 1.5, 0),  # Princess tower, 3x3
-        (BLUE_RIGHT_TOWER, 1.5, 0),  # Princess tower, 3x3
-        (BLUE_KING_TOWER, 2.0, 0),  # King tower, 4x4
-        (RED_LEFT_TOWER, 1.5, 1),  # Princess tower, 3x3
-        (RED_RIGHT_TOWER, 1.5, 1),  # Princess tower, 3x3
-        (RED_KING_TOWER, 2.0, 1)  # King tower, 4x4
+        (BLUE_LEFT_TOWER, 1, 0),  # Princess tower, 3x3
+        (BLUE_RIGHT_TOWER, 1, 0),  # Princess tower, 3x3
+        (BLUE_KING_TOWER, 1.4, 0),  # King tower, 4x4
+        (RED_LEFT_TOWER, 1, 1),  # Princess tower, 3x3
+        (RED_RIGHT_TOWER, 1, 1),  # Princess tower, 3x3
+        (RED_KING_TOWER, 1.4, 1)  # King tower, 4x4
     ]
     def is_valid_position(self, pos):
         return 0 <= pos.x < self.width and 0 <= pos.y < self.height

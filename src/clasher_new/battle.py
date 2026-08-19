@@ -113,9 +113,21 @@ class Entity:
                                                    attack_air=True, attack_ground=True)
 
     def in_attack_range(self, target):
-        return self.position.distance_to(target.position) <= self.data.range + target.data.collision_radius
+        if 'PrincessTower' in target.name:
+            bonus = 0.5
+        elif 'KingTower' in target.name:
+            bonus = 0.6
+        else:
+            bonus = 0
+        return self.position.distance_to(target.position) <= self.data.range + target.data.collision_radius + bonus
     def in_sight_range(self, target):
-        return self.position.distance_to(target.position) <= self.data.sight_range + target.data.collision_radius
+        if 'PrincessTower' in target.name:
+            bonus = 0.5
+        elif 'KingTower' in target.name:
+            bonus = 0.6
+        else:
+            bonus = 0
+        return self.position.distance_to(target.position) <= self.data.sight_range + target.data.collision_radius + bonus
 
     def get_nearest_target(self):
         """Find nearest valid target with priority rules"""
@@ -270,7 +282,7 @@ class Troop(Entity):
 
         # Move towards target if out of attack range
         distance = self.position.distance_to(current_target.position)
-        if distance > (self.data.range + current_target.data.collision_radius) or self.jumping_across_river:
+        if (not self.in_attack_range(current_target)) or self.jumping_across_river:
             has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river() and self.in_sight_range(current_target)
             if not self.jumping_across_river and has_jump_ability:
                 self.start_jumping_position = Position(self.position.x, self.position.y)
