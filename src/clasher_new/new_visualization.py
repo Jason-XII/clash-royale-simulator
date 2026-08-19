@@ -126,12 +126,11 @@ schedule = [('Knight', (9.5, 0.5), 0, 0),
             ('MiniPekka', (14.5, 20.5), 1, 18.936),
             ('MiniPekka', (14.5, 14.5), 0, 19.436)]
 
-schedule2 = [('MiniPekka', (10.5, 10.5), 0, 0),
-             ('MiniPekka', (10.5, 20.5), 1, 0)]
+schedule2 = [('MiniPekka', (10.5, 10.5), 0, 0)]
 
 
 if __name__ == "__main__":
     v = Visualizer()
-    for each in schedule:
+    for each in schedule2:
         v.deploy(*each)
     v.run()

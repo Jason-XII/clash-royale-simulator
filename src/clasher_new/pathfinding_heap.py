@@ -42,6 +42,7 @@ class EntityPathfinder:
         self.start_cell = position_to_cell(self.start_position)
         self.battle = battle_state
         self.goals = set()
+        self.goal = None
 
     def heuristic(self, cell):
         x, y = cell
@@ -63,7 +64,7 @@ class EntityPathfinder:
                 if distance < radius+0.375 and self.battle.ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
                     self.goals.add((x, y))
         # The second step is to filter goals, only keep the closest one.
-        self.goal = min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.target_position))
+        self.goal = min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.target_position)+cell_to_position(c).distance_to(self.start_position))
 
         g = {}
         f = {}
