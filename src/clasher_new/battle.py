@@ -289,24 +289,27 @@ class Troop(Entity):
                 self.jumping_across_river = True
                 self.data.is_air_unit = True
                 self.speed = self.data.jump_speed
-            if not self.path:
-                self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-            elif self.in_sight_range(current_target) and self.battle_state.tick % 3 == 0:
-                self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-
-            # determine the next waypoint and move towards that waypoint
-            min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
-            index = self.path.index(min_point)
-            start_vector = (self.position.x-self.path[0].x, self.position.y-self.path[0].y)
-            close_vector = (self.position.x-min_point.x, self.position.y-min_point.y)
-            dot = start_vector[0]*close_vector[0] + start_vector[1]*close_vector[1]
-            if dot >= 0:
-                # move towards next waypoint
-                index += 1
-            if index == len(self.path):
+            if self.data.is_air_unit:
                 self.move_towards(current_target.position, dt, True)
             else:
-                self.move_towards(self.path[index], dt, True)
+                if not self.path:
+                    self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+                elif self.in_sight_range(current_target) and self.battle_state.tick % 3 == 0:
+                    self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+
+                # determine the next waypoint and move towards that waypoint
+                min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
+                index = self.path.index(min_point)
+                start_vector = (self.position.x-self.path[0].x, self.position.y-self.path[0].y)
+                close_vector = (self.position.x-min_point.x, self.position.y-min_point.y)
+                dot = start_vector[0]*close_vector[0] + start_vector[1]*close_vector[1]
+                if dot >= 0:
+                    # move towards next waypoint
+                    index += 1
+                if index == len(self.path):
+                    self.move_towards(current_target.position, dt, True)
+                else:
+                    self.move_towards(self.path[index], dt, True)
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:
