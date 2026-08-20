@@ -33,6 +33,10 @@ class GameServer:
             'entities': [
                 e.to_dict()
                 for e in self.battle.entities.values() if e.is_alive
+            ],
+            'hands': [
+                self.battle.players[0].cycle,
+                self.battle.players[1].cycle
             ]
         }
 
@@ -88,8 +92,8 @@ class GameServer:
                 for pid, input_list in enumerate(self.inputs):
                     for inp in input_list:
                         if inp['type'] == 'deploy':
-                            print(inp['card'], pid, inp['x'], inp['y'], self.battle.time)
-                            self.battle.deploy_card(pid, inp['card'], Position(inp['x'], inp['y']))
+                            print(inp['card'], pid, int(inp['x'])+0.5, int(inp['y'])+0.5, self.battle.time)
+                            self.battle.deploy_card(pid, inp['card'], Position(int(inp['x'])+0.5, int(inp['y'])+0.5))
                     self.inputs[pid] = []
             self.battle.step(DT)
             self.broadcast({'type': 'state', **self.get_state()})

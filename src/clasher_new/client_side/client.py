@@ -296,6 +296,7 @@ while running:
 
     # Sync elixir from server
     player_state.elixir = state['elixir'][player_id]
+    player_state.cycle = state['hands'][player_id]
 
     # Draw
     screen.fill(WHITE)
