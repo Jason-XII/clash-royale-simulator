@@ -42,15 +42,18 @@ class CREnv(gym.Env):
         self.visualize = visualize
         self.visualizer = None
 
+        entity_id_high = np.array(
+            [len(entity_names) - 1, len(card_types) - 1, 1],
+            dtype=np.int64,
+        )
+
         self.observation_space = spaces.Dict({
             "entity_ids": spaces.Box(
                 low=0,
-                high=np.array([
-                    len(entity_names) - 1,
-                    len(card_types) - 1,
-                    1,
-                ]),
-                shape=(self.max_entities, 3),
+                high=np.broadcast_to(
+                    entity_id_high,
+                    (self.max_entities, 3),
+                ).copy(),
                 dtype=np.int64,
             ),
             "entity_features": spaces.Box(
@@ -165,7 +168,7 @@ class CREnv(gym.Env):
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
 
             speed = each.data.speed
-            hp_left = np.log(each.hp) / 10
+            hp_left = np.log(each.hp) / 10 if each.hp != 0 else 0
             hp_percentage = each.hp / each.data.hp if each.data.hp != 0 else 0
             hit_speed = each.data.hit_speed
             attack_range = each.data.range / 3
@@ -237,7 +240,6 @@ def random_strategy(observation):
 
 if __name__ == '__main__':
     env = CREnv(random_strategy)
-    env.reset()
-    print(env.observe(0))
+    check_env(env)
 
 
