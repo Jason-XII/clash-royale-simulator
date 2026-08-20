@@ -1,6 +1,7 @@
 import battle, player
 from new_visualization import Visualizer
 from core import Position
+from card_utils import Card
 
 import gymnasium as gym
 from random import shuffle, randint
@@ -35,13 +36,6 @@ class CREnv(gym.Env):
         self.opponent = opponent_model
         self.battle: battle.BattleState = None
         self.speed = speed
-        self.observation_space = gym.spaces.Dict({
-            "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(32, 18, 15), dtype=np.float32),
-            "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
-            "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32)
-        })
-        self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
-
         self.visualize = visualize
         self.visualizer = None
 
@@ -116,14 +110,21 @@ class CREnv(gym.Env):
 
     def observe(self, player_id_observe=0):
         """Gives a representation of game state"""
-        obs = np.zeros((32, 18, 15), dtype=np.float32)
-        for id, each in self.battle.entities.items():
+        entity_list = []
+        entity_features = []
+        for _, each in self.battle.entities.items():
             if not each.is_alive: continue
-            if isinstance(each, battle.Projectile): continue
+            if each.name not in entity_names: continue
+            # Previously I filtered out all projectiles thinking that they were useless;
+            # But fireball and arrows are spells, so this makes the model blind to spells, which is a big mistake.
+            # Now I only filter out those not in the known entity names list.
             entity_id = entity_names.index(each.name)
             card_type = card_types.index(each.data.type)
-            player_id = each.player
+            player_id = int(each.player!=player_id_observe)
+            # This makes the opponent observation more accurate
             elixir = each.data.elixir
+            entity_list.append((entity_id, card_type, player_id))
+
             is_air = int(each.data.is_air_unit)
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
 
@@ -136,22 +137,62 @@ class CREnv(gym.Env):
             damage = each.data.damage / 200
             projectile_damage = each.data.projectile_data.damage / 200
 
-            x, y = int(each.position.x), int(each.position.y)
+            x, y = each.position.x/18, each.position.y/32
             if player_id == 1:
-                x = 17-x
-                y = 31-y
-            obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
-                                hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
-            obs[y][x] = obs_arr.copy()
+                x = 1-x
+                y = 1-y
+            obs_arr = (elixir, speed, is_air, attacks_ground, attacks_air, hp_left, hp_percentage,
+                       hit_speed, attack_range, sight_range, damage, projectile_damage,
+                       x, y)
+            # Although cooldown is an important factor, I currently don't know how to observe that cooldown yet
+            # in the real game, so I'll leave it for now.
+            entity_features.append(obs_arr)
 
-        hand = np.array([entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]],
-                        dtype=np.int32)
+        hand = [entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]]
+        elixir = self.battle.players[player_id_observe].elixir
+        hand_mask = [Card(each).elixir <= elixir for each in self.battle.players[player_id_observe].cycle[:4]] + [False]
+        clock = self.battle.time
+        if clock < 120:
+            phase = 1
+        elif clock < 180:
+            phase = 2
+        elif clock < 240:
+            phase = 3
+        else:
+            phase = 4
+        normalized_clock = clock / 180
+        crown_difference = self.battle.players[1-player_id_observe].get_crown_count()-self.battle.players[player_id_observe].get_crown_count()
 
-        return {
-            'grid': obs,
-            'hand': hand,
-            'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32)
-        }
+        state = [normalized_clock, elixir/10, phase, crown_difference/3]
+
+        max_entities = 128
+
+        entity_count = len(entity_list)
+        if entity_count > max_entities:
+            raise ValueError("Too many entities")
+        entity_ids = np.zeros((max_entities, 3), dtype=np.int64)
+        entity_ids[:entity_count] = np.asarray(
+            [entity[:3] for entity in entity_list[:entity_count]],
+            dtype=np.int64,
+        )
+        # The value might need to change later when the observation changes
+        entity_features_array = np.zeros(
+            (max_entities, 14),
+            dtype=np.float32,
+        )
+        entity_features_array[:entity_count] = np.asarray(entity_features[:entity_count], dtype=np.float32)
+
+        entity_mask = np.zeros(max_entities, dtype=np.bool_)
+        entity_mask[:entity_count] = True
+
+        return (
+            entity_ids,
+            entity_features_array,
+            entity_mask,
+            np.asarray(hand, dtype=np.int64),
+            np.asarray(hand_mask, dtype=np.bool_),
+            np.asarray(state, dtype=np.float32),
+        )
 
 
 def random_strategy(observation):
@@ -161,7 +202,8 @@ def random_strategy(observation):
     return slot, y, x
 
 if __name__ == '__main__':
-    env = CREnv(random_strategy, visualize=True)
-    check_env(env)
+    env = CREnv(random_strategy)
+    env.reset()
+    print(env.observe(0))
 
 
