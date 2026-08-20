@@ -93,7 +93,6 @@ class Entity:
         self.pending_damage = []
 
 
-
     def take_damage(self, amount: float, delayed=False):
         """Apply damage to entity"""
         if self.invincible: return
@@ -180,11 +179,15 @@ class Entity:
                 not self.battle_state.entities.get(self.target_id).is_alive:
             # doesn't have a valid prior target
             self.target_id = None
+            self.path = []
         else:
             current_target = self.battle_state.entities.get(self.target_id)
             if not self.in_sight_range(current_target):
+                if 'PrincessTower' not in current_target.name:
+                    self.path = []
                 current_target = None
                 self.target_id = None
+
         best_target = self.get_nearest_target()
         if self.target_id:
             if self._should_switch_target(self.battle_state.entities[self.target_id], best_target):
@@ -200,7 +203,7 @@ class Entity:
             min_distance = float('inf')
             self.target_id = 1
             for i in range(1, 7):
-                if i not in self.battle_state.entities: continue
+                if not self.battle_state.entities[i].is_alive: continue
                 possible_princess_tower = self.battle_state.entities[i]
                 if possible_princess_tower.player == self.player: continue
                 distance = possible_princess_tower.position.distance_to(self.position) - possible_princess_tower.data.collision_radius
@@ -281,7 +284,6 @@ class Troop(Entity):
         # The case is even the same with ground troops and air troops.
 
         # Move towards target if out of attack range
-        distance = self.position.distance_to(current_target.position)
         if (not self.in_attack_range(current_target)) or self.jumping_across_river:
             has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river() and self.in_sight_range(current_target)
             if not self.jumping_across_river and has_jump_ability:

@@ -1,7 +1,7 @@
 from environment import CREnv, random_strategy, entity_names
 import time
 from stable_baselines3 import PPO
-from train import CRFeatureExtractor
+from train import CRTransformerExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 def make_env():
