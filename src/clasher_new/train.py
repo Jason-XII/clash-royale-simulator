@@ -9,6 +9,7 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+import os
 
 import time
 
@@ -222,16 +223,39 @@ class RandomEvalCallback(BaseCallback):
         return True
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     env = CREnv(opponent_model=random_strategy)
+
+    checkpoint = "cr_checkpoint"
     policy_kwargs = {
         "features_extractor_class": CRTransformerExtractor,
         "net_arch": {"pi": [], "vf": []},
     }
-    model = PPO(CRAutoregressivePolicy, env, policy_kwargs=policy_kwargs)
-    cb = CheckpointCallback(save_freq=10_000, save_path="./cr_logs/", name_prefix="cr")
+
+    if os.path.exists(checkpoint + ".zip"):
+        model = PPO.load(checkpoint, env=env)
+    else:
+        model = PPO(
+            CRAutoregressivePolicy,
+            env,
+            policy_kwargs=policy_kwargs,
+            n_steps=2048,
+            batch_size=64,
+            verbose=1,
+            tensorboard_log="./cr_logs/tensorboard/",
+        )
+
+    cb = CheckpointCallback(
+        save_freq=10_000,
+        save_path="./cr_logs/",
+        name_prefix="cr",
+    )
+
     try:
-        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb])
+        model.learn(
+            total_timesteps=1_000_000,
+            reset_num_timesteps=False,
+            callback=cb,
+        )
     finally:
-        print('Saving model.')
-        model.save('cr_discrete')
+        model.save("cr_checkpoint")

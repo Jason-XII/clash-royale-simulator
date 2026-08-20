@@ -100,7 +100,6 @@ class CREnv(gym.Env):
         if slot != 0:
             card_name = p1.cycle[slot - 1]
             self.battle.deploy_card(1, card_name, Position(18-(x+0.5), 32-(y+0.5)))
-            print(card_name, 18-(x+0.5), 32-(y+0.5), 1, self.battle.time)
             # Yes, this transformation seems weird, but it should be correct
 
 
@@ -122,7 +121,6 @@ class CREnv(gym.Env):
         slot, y, x = self.decode_action(action)
         if slot != 0:
             card_name = p0.cycle[slot-1]
-            print(card_name, x+0.5, y+0.5, 0, self.battle.time)
             self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
 
         self.opponent_action()
