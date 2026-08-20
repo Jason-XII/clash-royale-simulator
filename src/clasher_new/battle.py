@@ -549,11 +549,14 @@ class BattleState:
         self.ensure_walkability(entity)
         entity.battle_state = self
         entity.id = self.next_entity_id
-        self.entities[len(self.entities)+1] = entity
+        self.entities[self.next_entity_id] = entity
         self.next_entity_id += 1
 
     def _wrap(self, entity_data):
         card_name = entity_data[3]
+        entity_data = list(entity_data)
+        entity_data[0] = self.next_entity_id
+        self.next_entity_id += 1
         if len(entity_data) == 7:
             return Projectile(*entity_data)
         if card_name in spells:
@@ -657,6 +660,8 @@ class BattleState:
             delayed_counter = 0
             for wave in range(card_info.projectile_waves):
                 initial_position = Position(initial_position.x, initial_position.y)
+                # I know that I should not use `len(self.entities)+1` here because it would cause bugs.
+                # so in the actual `delay_spawn` function, I added another layer that corrects the entity id to a legit one.
                 self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
                 delayed_counter += card_info.wave_interval
             self.players[player_id].play_card(card_name)
