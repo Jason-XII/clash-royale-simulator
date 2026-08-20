@@ -4,6 +4,7 @@ from core import Position
 from card_utils import Card
 
 import gymnasium as gym
+from gymnasium import spaces
 from random import shuffle, randint
 import time
 import numpy as np
@@ -31,6 +32,8 @@ speed_types = [0, 0.75, 1.0, 1.5]
 
 
 class CREnv(gym.Env):
+    max_entities = 128
+    feature_count = 14
     def __init__(self, opponent_model=None, visualize=False, speed=1.0):
         super().__init__()
         self.opponent = opponent_model
@@ -38,6 +41,39 @@ class CREnv(gym.Env):
         self.speed = speed
         self.visualize = visualize
         self.visualizer = None
+
+        self.observation_space = spaces.Dict({
+            "entity_ids": spaces.Box(
+                low=0,
+                high=np.array([
+                    len(entity_names) - 1,
+                    len(card_types) - 1,
+                    1,
+                ]),
+                shape=(self.max_entities, 3),
+                dtype=np.int64,
+            ),
+            "entity_features": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.max_entities, self.feature_count),
+                dtype=np.float32,
+            ),
+            "entity_mask": spaces.MultiBinary(self.max_entities),
+            "hand": spaces.Box(
+                low=0,
+                high=len(entity_names) - 1,
+                shape=(5,),
+                dtype=np.int64,
+            ),
+            "hand_mask": spaces.MultiBinary(5),
+            "state": spaces.Box(
+                low=np.array([0.0, 0.0, 1.0, -1.0], dtype=np.float32),
+                high=np.array([np.inf, 1.0, 4.0, 1.0], dtype=np.float32),
+                dtype=np.float32,
+            ),
+        })
+        self.action_space = spaces.MultiDiscrete([5, 32, 18])
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -165,34 +201,32 @@ class CREnv(gym.Env):
 
         state = [normalized_clock, elixir/10, phase, crown_difference/3]
 
-        max_entities = 128
-
         entity_count = len(entity_list)
-        if entity_count > max_entities:
+        if entity_count > self.max_entities:
             raise ValueError("Too many entities")
-        entity_ids = np.zeros((max_entities, 3), dtype=np.int64)
+        entity_ids = np.zeros((self.max_entities, 3), dtype=np.int64)
         entity_ids[:entity_count] = np.asarray(
             [entity[:3] for entity in entity_list[:entity_count]],
             dtype=np.int64,
         )
         # The value might need to change later when the observation changes
         entity_features_array = np.zeros(
-            (max_entities, 14),
+            (self.max_entities, self.feature_count),
             dtype=np.float32,
         )
         entity_features_array[:entity_count] = np.asarray(entity_features[:entity_count], dtype=np.float32)
 
-        entity_mask = np.zeros(max_entities, dtype=np.bool_)
+        entity_mask = np.zeros(self.max_entities, dtype=np.bool_)
         entity_mask[:entity_count] = True
 
-        return (
-            entity_ids,
-            entity_features_array,
-            entity_mask,
-            np.asarray(hand, dtype=np.int64),
-            np.asarray(hand_mask, dtype=np.bool_),
-            np.asarray(state, dtype=np.float32),
-        )
+        return {
+            "entity_ids": entity_ids,
+            "entity_features": entity_features_array,
+            "entity_mask": entity_mask,
+            "hand": np.asarray(hand, dtype=np.int64),
+            "hand_mask": np.asarray(hand_mask, dtype=np.bool_),
+            "state": np.asarray(state, dtype=np.float32),
+        }
 
 
 def random_strategy(observation):
