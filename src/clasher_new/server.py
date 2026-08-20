@@ -88,6 +88,7 @@ class GameServer:
                 for pid, input_list in enumerate(self.inputs):
                     for inp in input_list:
                         if inp['type'] == 'deploy':
+                            print(inp['card'], pid, inp['x'], inp['y'], self.battle.time)
                             self.battle.deploy_card(pid, inp['card'], Position(inp['x'], inp['y']))
                     self.inputs[pid] = []
             self.battle.step(DT)

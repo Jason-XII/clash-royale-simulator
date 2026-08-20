@@ -76,7 +76,7 @@ class CREnv(gym.Env):
                 dtype=np.float32,
             ),
         })
-        self.action_space = spaces.MultiDiscrete([5, 32, 18])
+        self.action_space = spaces.MultiDiscrete([5, 32 * 18])
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -89,10 +89,13 @@ class CREnv(gym.Env):
         # Now return initial observation
         return self.observe(0), {}
 
+    def decode_action(self, action):
+        slot, tile = action
+        return int(slot), int(tile) // 18, int(tile) % 18
+
     def opponent_action(self):
         obs1 = self.observe(1)
-        opponent_action = self.opponent(obs1)
-        slot, y, x = opponent_action
+        slot, y, x = self.decode_action(self.opponent(obs1))
         p1 = self.battle.players[1]
         if slot != 0:
             card_name = p1.cycle[slot - 1]
@@ -115,7 +118,7 @@ class CREnv(gym.Env):
         blue_left = 3-p0.get_crown_count()
         red_left = 3-p1.get_crown_count()
 
-        slot, y, x = action
+        slot, y, x = self.decode_action(action)
         if slot != 0:
             card_name = p0.cycle[slot-1]
             self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
@@ -234,9 +237,8 @@ class CREnv(gym.Env):
 
 def random_strategy(observation):
     slot = randint(0, 4)
-    y = randint(0, 31)
-    x = randint(0, 17)
-    return slot, y, x
+    tile = randint(0, 32 * 18 - 1)
+    return slot, tile
 
 if __name__ == '__main__':
     env = CREnv(random_strategy)
