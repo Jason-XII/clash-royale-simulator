@@ -115,7 +115,7 @@ class Visualizer:
             self.render_frame()
         pygame.quit()
 
-player_0_deck = ['Knight', 'Balloon', 'Minions', 'Musketeer', 'Arrows', 'Fireball', 'Giant', 'Archer']
+player_0_deck = ['Knight', 'MiniPekka', 'Minions', 'Musketeer', 'Arrows', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Giant', 'Archer', 'MiniPekka', 'Musketeer', 'Minions', 'Fireball', 'Arrows', 'Knight']
 
 schedule = [('Knight', (9.5, 0.5), 0, 0),
@@ -126,7 +126,8 @@ schedule = [('Knight', (9.5, 0.5), 0, 0),
             ('MiniPekka', (14.5, 20.5), 1, 18.936),
             ('MiniPekka', (14.5, 14.5), 0, 19.436)]
 
-schedule2 = [('Archer', (12.5, 18.5), 1, 0)]
+schedule2 = [('MiniPekka', (12.5, 18.5), 1, 0),
+             ('Knight', (16.5, 2.5), 0, 4)]
 
 
 if __name__ == "__main__":

@@ -113,12 +113,14 @@ class Entity:
                                                    attack_air=True, attack_ground=True)
 
     def in_attack_range(self, target):
+        if target is None: return False
         if 'PrincessTower' in target.name:
             bonus = 0.5
         else:
             bonus = 0
         return self.position.distance_to(target.position) <= self.data.range + target.data.collision_radius + bonus
     def in_sight_range(self, target):
+        if target is None: return False
         if 'PrincessTower' in target.name:
             bonus = 0.5
         else:
@@ -129,6 +131,7 @@ class Entity:
         """Find nearest valid target with priority rules"""
         building_targets = []
         troop_targets = []
+
         for entity in list(self.battle_state.entities.values()):
             if not isinstance(entity, Troop) and not isinstance(entity, Building): continue
             if not entity.is_alive or entity.player == self.player: continue
@@ -141,9 +144,13 @@ class Entity:
                     building_targets.append((distance, entity))
                 elif not self.data.target_only_buildings:
                     troop_targets.append((distance, entity))
+        closest_building = min(building_targets, key=lambda x: x[0])[1] if building_targets else None
+        closest_troop = min(troop_targets, key=lambda x: x[0])[1] if troop_targets else None
 
         if self.data.target_only_buildings:
             targets = building_targets
+        elif self.in_attack_range(closest_building) or self.in_attack_range(closest_troop):
+            targets = troop_targets + building_targets
         else:
             targets = troop_targets if troop_targets else building_targets
 

@@ -4,6 +4,8 @@ from new_visualization import Visualizer
 from environment import CREnv, random_strategy, player_0_deck, shuffle, Position
 from stable_baselines3 import PPO
 
+import torch
+
 class SequentialEvalEnv(CREnv):
     def __init__(self, start_deck, events, visualize=False, speed=1.0):
         super().__init__(visualize=visualize, speed=speed)
@@ -47,7 +49,10 @@ for i in range(1):
     while not done:
         action, _ = model.predict(obs)
         obs, reward, termination, truncation, info = env.step(action)
-        print(reward)
+        obs_tensor, _ = model.policy.obs_to_tensor(obs)
+        with torch.no_grad():
+            value = model.policy.predict_values(obs_tensor)
+        print(reward, value.item())
         done = termination or truncation
         total_reward += reward
 

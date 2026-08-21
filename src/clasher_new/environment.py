@@ -138,7 +138,7 @@ class CREnv(gym.Env):
         blue_left_new = 3-p0.get_crown_count()
         red_left_new = 3-p1.get_crown_count()
 
-        reward = 5*(red_left-red_left_new)-5*(blue_left-blue_left_new)+0.001*(red_hps_old-red_hps_new)-0.0012*(blue_hps_old-blue_hps_new)
+        reward = 3*(red_left-red_left_new)-3*(blue_left-blue_left_new)+0.001*(red_hps_old-red_hps_new)-0.0012*(blue_hps_old-blue_hps_new)
         if self.battle.game_over:
             #print('Battle over.', self.battle.winner, reward, p0.king_tower_hp, p0.left_tower_hp, p0.right_tower_hp,
             #      p1.king_tower_hp, p1.left_tower_hp, p1.right_tower_hp)
