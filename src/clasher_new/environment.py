@@ -121,7 +121,9 @@ class CREnv(gym.Env):
         slot, y, x = self.decode_action(action)
         if slot != 0:
             card_name = p0.cycle[slot-1]
-            self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
+            success = self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
+            if not success:
+                print("Invalid deployment")
 
         self.opponent_action()
         # only make decisions per half second

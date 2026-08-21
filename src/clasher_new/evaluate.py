@@ -47,12 +47,12 @@ for i in range(1):
     done = False
     total_reward = 0
     while not done:
-        action, _ = model.predict(obs)
+        action, _ = model.predict(obs,deterministic=False)
+        print(action, obs['hand_mask'])
         obs, reward, termination, truncation, info = env.step(action)
         obs_tensor, _ = model.policy.obs_to_tensor(obs)
         with torch.no_grad():
             value = model.policy.predict_values(obs_tensor)
-        print(reward, value.item())
         done = termination or truncation
         total_reward += reward
 
