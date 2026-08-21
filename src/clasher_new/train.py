@@ -65,59 +65,91 @@ class CRTransformerExtractor(BaseFeaturesExtractor):
         return self.transformer(tokens, src_key_padding_mask=padding_mask)[:, 0]
 
 
+class FactorizedActionNet(nn.Module):
+    def __init__(self, latent_dim, embedding_dim=64):
+        super().__init__()
+        self.card_logits = nn.Linear(latent_dim, 5)
+        self.context = nn.Linear(latent_dim, embedding_dim)
+        self.card_embedding = nn.Parameter(torch.randn(5, embedding_dim))
+        self.y_embedding = nn.Parameter(torch.randn(32, embedding_dim))
+        self.x_embedding = nn.Parameter(torch.randn(18, embedding_dim))
+
+    def forward(self, latent):
+        context = self.context(latent)
+        card_context = context.unsqueeze(1) + self.card_embedding.unsqueeze(0)
+        y_logits = torch.einsum("bcd,yd->bcy", card_context, self.y_embedding)
+        xy_context = card_context.unsqueeze(2) + self.y_embedding.view(1, 1, 32, -1)
+        x_logits = torch.einsum("bcyd,xd->bcyx", xy_context, self.x_embedding)
+        return self.card_logits(latent), y_logits, x_logits
+
+
 class AutoregressiveDistribution(Distribution):
     def __init__(self):
         super().__init__()
         self.card_distribution = None
-        self.tile_logits = None
+        self.y_logits = None
+        self.x_logits = None
 
     def proba_distribution_net(self, latent_dim):
-        return nn.Linear(latent_dim, 5 + 5 * 32 * 18)
+        return FactorizedActionNet(latent_dim)
 
     def proba_distribution(self, action_logits, card_mask=None):
+        card_logits, y_logits, x_logits = action_logits
         if card_mask is not None:
-            action_logits = action_logits.clone()
-            action_logits[:, :5] = action_logits[:, :5].masked_fill(
-                ~card_mask, -torch.inf
-            )
-        self.card_distribution = torch.distributions.Categorical(
-            logits=action_logits[:, :5]
-        )
-        self.tile_logits = action_logits[:, 5:].view(-1, 5, 32 * 18)
+            card_logits = card_logits.masked_fill(~card_mask, -torch.inf)
+        self.card_distribution = torch.distributions.Categorical(logits=card_logits)
+        self.y_logits = y_logits
+        self.x_logits = x_logits
         return self
 
-    def tile_distribution(self, card_slots):
+    def y_distribution(self, card_slots):
         batch_indices = torch.arange(card_slots.shape[0], device=card_slots.device)
         return torch.distributions.Categorical(
-            logits=self.tile_logits[batch_indices, card_slots]
+            logits=self.y_logits[batch_indices, card_slots]
+        )
+
+    def x_distribution(self, card_slots, ys):
+        batch_indices = torch.arange(card_slots.shape[0], device=card_slots.device)
+        return torch.distributions.Categorical(
+            logits=self.x_logits[batch_indices, card_slots, ys]
         )
 
     def log_prob(self, actions):
         card_slots = actions[:, 0].long()
         tiles = actions[:, 1].long()
+        ys = tiles // 18
+        xs = tiles % 18
+        active = card_slots != 0
         log_prob = self.card_distribution.log_prob(card_slots)
-        tile_log_prob = self.tile_distribution(card_slots).log_prob(tiles)
-        return log_prob + (card_slots != 0) * tile_log_prob
+        log_prob = log_prob + active * self.y_distribution(card_slots).log_prob(ys)
+        log_prob = log_prob + active * self.x_distribution(card_slots, ys).log_prob(xs)
+        return log_prob
 
     def entropy(self):
+        card_probs = self.card_distribution.probs
         card_entropy = self.card_distribution.entropy()
-        tile_entropy = torch.distributions.Categorical(
-            logits=self.tile_logits
-        ).entropy()
-        return card_entropy + (
-            self.card_distribution.probs[:, 1:] * tile_entropy[:, 1:]
-        ).sum(dim=1)
+        y_entropy = torch.distributions.Categorical(logits=self.y_logits).entropy()
+        x_entropy = torch.distributions.Categorical(logits=self.x_logits).entropy()
+        conditional_entropy = (card_probs[:, 1:] * y_entropy[:, 1:]).sum(dim=1)
+        y_probs = torch.softmax(self.y_logits[:, 1:], dim=-1)
+        conditional_entropy += (
+            card_probs[:, 1:, None] * y_probs * x_entropy[:, 1:]
+        ).sum(dim=(1, 2))
+        return card_entropy + conditional_entropy
 
     def sample(self):
         card_slots = self.card_distribution.sample()
-        tiles = self.tile_distribution(card_slots).sample()
+        ys = self.y_distribution(card_slots).sample()
+        xs = self.x_distribution(card_slots, ys).sample()
+        tiles = ys * 18 + xs
         tiles = tiles * (card_slots != 0)
         return torch.stack([card_slots, tiles], dim=1)
 
     def mode(self):
         card_slots = torch.argmax(self.card_distribution.probs, dim=1)
-        tiles = torch.argmax(self.tile_distribution(card_slots).probs, dim=1)
-        tiles = tiles * (card_slots != 0)
+        ys = torch.argmax(self.y_distribution(card_slots).probs, dim=1)
+        xs = torch.argmax(self.x_distribution(card_slots, ys).probs, dim=1)
+        tiles = (ys * 18 + xs) * (card_slots != 0)
         return torch.stack([card_slots, tiles], dim=1)
 
     def actions_from_params(self, action_logits, deterministic=False):

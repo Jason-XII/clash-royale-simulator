@@ -37,7 +37,7 @@ class SequentialEvalEnv(CREnv):
 #                         visualize=True, speed=1)
 
 
-model = PPO.load("cr_logs/cr_570000_steps.zip")
+model = PPO.load("cr_logs/cr_202993_steps.zip")
 env = CREnv(opponent_model=random_strategy, visualize=True)
 
 
