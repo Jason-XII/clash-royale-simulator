@@ -241,7 +241,7 @@ if __name__ == "__main__":
             policy_kwargs=policy_kwargs,
             n_steps=2048,
             batch_size=64,
-            ent_coef=0.001,
+            ent_coef=0.01,
             verbose=1,
             tensorboard_log="./cr_logs/tensorboard/",
         )
