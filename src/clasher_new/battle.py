@@ -70,6 +70,7 @@ class Entity:
         """Automatically call entity holder's on_death to prevent bugs"""
         self.is_alive = False
         self.entity_holder.on_death()
+        self.battle_state.on_death(self)
 
     def update(self, dt):
         # This part may be a bit confusing because it doesn't check the `is_alive` and `deploy_delay_remaining` attribute.
