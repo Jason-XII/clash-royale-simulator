@@ -114,16 +114,12 @@ class Entity:
     def in_attack_range(self, target):
         if 'PrincessTower' in target.name:
             bonus = 0.5
-        elif 'KingTower' in target.name:
-            bonus = 0.6
         else:
             bonus = 0
         return self.position.distance_to(target.position) <= self.data.range + target.data.collision_radius + bonus
     def in_sight_range(self, target):
         if 'PrincessTower' in target.name:
             bonus = 0.5
-        elif 'KingTower' in target.name:
-            bonus = 0.6
         else:
             bonus = 0
         return self.position.distance_to(target.position) <= self.data.sight_range + target.data.collision_radius + bonus

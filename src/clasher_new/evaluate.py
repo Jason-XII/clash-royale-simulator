@@ -35,8 +35,8 @@ class SequentialEvalEnv(CREnv):
 #                         visualize=True, speed=1)
 
 
-model = PPO.load("cr_logs/cr_1660000_steps.zip")
-env = CREnv(opponent_model=lambda x: model.predict(x)[0], visualize=True)
+model = PPO.load("cr_logs/cr_570000_steps.zip")
+env = CREnv(opponent_model=random_strategy, visualize=True)
 
 
 lost_hp = 0
@@ -47,11 +47,8 @@ for i in range(1):
     while not done:
         action, _ = model.predict(obs)
         obs, reward, termination, truncation, info = env.step(action)
-        # print(reward)
+        print(reward)
         done = termination or truncation
         total_reward += reward
 
     p0 = env.battle.players[0]
-    lost_hp += 3052-max(p0.right_tower_hp, 0) + 4824-max(p0.king_tower_hp, 0)
-
-print('Average lost hp: ', lost_hp/100)
