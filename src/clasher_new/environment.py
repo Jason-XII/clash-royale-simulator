@@ -48,7 +48,7 @@ class CREnv(gym.Env):
     feature_count = 14
     def __init__(self, opponent_model=None, visualize=False, speed=1.0):
         super().__init__()
-        self.opponent = opponent_model
+        self.opponent = opponent_model or legal_random_strategy
         self.battle: battle.BattleState = None
         self.speed = speed
         self.visualize = visualize
@@ -221,15 +221,13 @@ class CREnv(gym.Env):
             entity_id = entity_names.index(each.name)
             card_type = card_types.index(each.data.type)
             player_id = int(each.player!=player_id_observe)
-            # This makes the opponent observation more accurate
-            elixir = each.data.elixir
+            # Normalize magnitudes so the policy does not have to learn unit conversions.
+            elixir = each.data.elixir / 10.0
+            speed = each.data.speed / 2.0
+            hp_left = np.log1p(each.hp) / 10 if each.hp != 0 else 0
             entity_list.append((entity_id, card_type, player_id))
-
             is_air = int(each.data.is_air_unit)
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
-
-            speed = each.data.speed
-            hp_left = np.log(each.hp) / 10 if each.hp != 0 else 0
             hp_percentage = each.hp / each.data.hp if each.data.hp != 0 else 0
             hit_speed = each.data.hit_speed
             attack_range = each.data.range / 3
