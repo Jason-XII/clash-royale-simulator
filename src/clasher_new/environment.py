@@ -5,7 +5,7 @@ from card_utils import Card
 
 import gymnasium as gym
 from gymnasium import spaces
-from random import shuffle, randint
+from random import shuffle
 import time
 import random
 import numpy as np
@@ -14,8 +14,6 @@ from stable_baselines3.common.env_checker import check_env
 
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
-player_0_deck_base = player_0_deck[:]
-player_1_deck_base = player_1_deck[:]
 
 b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
                        player.PlayerState(1, player_1_deck, 10))
@@ -32,6 +30,17 @@ card_types = ['troop', 'character', 'spell', 'building']
 # Troop mean princess tower, short for tower troop.
 # Actual troops are represented as "characters".
 speed_types = [0, 0.75, 1.0, 1.5]
+
+
+def decode_action(action):
+    slot, tile = action
+    return int(slot), int(tile) // 18, int(tile) % 18
+
+
+def action_position(player_id, y, x):
+    if player_id == 0:
+        return Position(x + 0.5, y + 0.5)
+    return Position(18 - (x + 0.5), 32 - (y + 0.5))
 
 
 class CREnv(gym.Env):
@@ -87,8 +96,7 @@ class CREnv(gym.Env):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
-        deck0 = player_0_deck_base[:]
-        deck1 = player_1_deck_base[:]
+        deck0,deck1 = player_0_deck[:],player_1_deck[:]
         shuffle(deck0)
         shuffle(deck1)
         self.battle = battle.BattleState(player.PlayerState(0, deck0, 5.0),
@@ -97,43 +105,6 @@ class CREnv(gym.Env):
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
         return self.observe(0), {}
-
-    def decode_action(self, action):
-        slot, tile = action
-        return int(slot), int(tile) // 18, int(tile) % 18
-
-    def action_position(self, player_id, y, x):
-        if player_id == 0:
-            return Position(x + 0.5, y + 0.5)
-        return Position(18 - (x + 0.5), 32 - (y + 0.5))
-
-    def can_deploy(self, player_id, card_name, position, card_info=None):
-        if not self.battle.players[player_id].can_play_card(card_name):
-            return False
-        card_info = card_info or Card(card_name)
-        if card_info.type == "spell":
-            return True
-        if self.battle.is_position_occupied_by_building(position, 0):
-            return False
-        if player_id == 0:
-            if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0):
-                return False
-            if position.y >= 21.0:
-                return False
-            if position.y >= 15.0:
-                tower_hp = (self.battle.players[1].left_tower_hp
-                            if position.x <= 9 else self.battle.players[1].right_tower_hp)
-                return tower_hp <= 0
-        else:
-            if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0):
-                return False
-            if position.y <= 10:
-                return False
-            if position.y <= 17.0:
-                tower_hp = (self.battle.players[0].left_tower_hp
-                            if position.x <= 9 else self.battle.players[0].right_tower_hp)
-                return tower_hp <= 0
-        return True
 
     def placement_mask(self, player_id):
         mask = np.zeros((4, 32 * 18), dtype=np.bool_)
@@ -175,11 +146,11 @@ class CREnv(gym.Env):
 
     def opponent_action(self):
         obs1 = self.observe(1)
-        slot, y, x = self.decode_action(self.opponent(obs1))
+        slot, y, x = decode_action(self.opponent(obs1))
         p1 = self.battle.players[1]
         if slot != 0:
             card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, self.action_position(1, y, x))
+            self.battle.deploy_card(1, card_name, action_position(1, y, x))
             # Yes, this transformation seems weird, but it should be correct
 
 
@@ -198,12 +169,12 @@ class CREnv(gym.Env):
         blue_left = 3-p0.get_crown_count()
         red_left = 3-p1.get_crown_count()
 
-        slot, y, x = self.decode_action(action)
+        slot, y, x = decode_action(action)
         deployment_succeeded = slot == 0
         if slot != 0:
             card_name = p0.cycle[slot-1]
             deployment_succeeded = self.battle.deploy_card(
-                0, card_name, self.action_position(0, y, x)
+                0, card_name, action_position(0, y, x)
             )
 
         self.opponent_action()
@@ -302,7 +273,7 @@ class CREnv(gym.Env):
             [entity[:3] for entity in entity_list[:entity_count]],
             dtype=np.int64,
         )
-        # The value might need to change later when the observation changes
+        # `self.feature_count` might need to change later when the observation changes
         entity_features_array = np.zeros(
             (self.max_entities, self.feature_count),
             dtype=np.float32,
@@ -361,7 +332,7 @@ def defensive_random_strategy(observation):
 
 
 def mixed_random_strategy(observation):
-    strategy = np.random.choice([
+    strategy = random.choice([
         legal_random_strategy,
         patient_random_strategy,
         bridge_random_strategy,

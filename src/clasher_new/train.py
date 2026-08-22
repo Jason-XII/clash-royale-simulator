@@ -8,7 +8,6 @@ from environment import (
     patient_random_strategy,
 )
 
-from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
@@ -16,13 +15,10 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.distributions import Distribution
 from stable_baselines3.common.policies import ActorCriticPolicy
 import torch.nn as nn
-import torch.nn.functional as F
 import torch
 import os
 import random
 from pathlib import Path
-
-import time
 
 
 class CRTransformerExtractor(BaseFeaturesExtractor):
