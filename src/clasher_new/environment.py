@@ -7,12 +7,15 @@ import gymnasium as gym
 from gymnasium import spaces
 from random import shuffle, randint
 import time
+import random
 import numpy as np
 
 from stable_baselines3.common.env_checker import check_env
 
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
+player_0_deck_base = player_0_deck[:]
+player_1_deck_base = player_1_deck[:]
 
 b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
                        player.PlayerState(1, player_1_deck, 10))
@@ -70,6 +73,7 @@ class CREnv(gym.Env):
                 dtype=np.int64,
             ),
             "hand_mask": spaces.MultiBinary(5),
+            "placement_mask": spaces.MultiBinary((4, 32 * 18)),
             "state": spaces.Box(
                 low=np.array([0.0, 0.0, 1.0, -1.0], dtype=np.float32),
                 high=np.array([np.inf, 1.0, 4.0, 1.0], dtype=np.float32),
@@ -80,10 +84,15 @@ class CREnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        shuffle(player_0_deck)
-        shuffle(player_1_deck)
-        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
-                       player.PlayerState(1, player_1_deck[:], 5.0))
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+        deck0 = player_0_deck_base[:]
+        deck1 = player_1_deck_base[:]
+        shuffle(deck0)
+        shuffle(deck1)
+        self.battle = battle.BattleState(player.PlayerState(0, deck0, 5.0),
+                       player.PlayerState(1, deck1, 5.0))
         if self.visualize:
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
@@ -93,13 +102,84 @@ class CREnv(gym.Env):
         slot, tile = action
         return int(slot), int(tile) // 18, int(tile) % 18
 
+    def action_position(self, player_id, y, x):
+        if player_id == 0:
+            return Position(x + 0.5, y + 0.5)
+        return Position(18 - (x + 0.5), 32 - (y + 0.5))
+
+    def can_deploy(self, player_id, card_name, position, card_info=None):
+        if not self.battle.players[player_id].can_play_card(card_name):
+            return False
+        card_info = card_info or Card(card_name)
+        if card_info.type == "spell":
+            return True
+        if self.battle.is_position_occupied_by_building(position, 0):
+            return False
+        if player_id == 0:
+            if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0):
+                return False
+            if position.y >= 21.0:
+                return False
+            if position.y >= 15.0:
+                tower_hp = (self.battle.players[1].left_tower_hp
+                            if position.x <= 9 else self.battle.players[1].right_tower_hp)
+                return tower_hp <= 0
+        else:
+            if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0):
+                return False
+            if position.y <= 10:
+                return False
+            if position.y <= 17.0:
+                tower_hp = (self.battle.players[0].left_tower_hp
+                            if position.x <= 9 else self.battle.players[0].right_tower_hp)
+                return tower_hp <= 0
+        return True
+
+    def placement_mask(self, player_id):
+        mask = np.zeros((4, 32 * 18), dtype=np.bool_)
+        tiles = np.arange(32 * 18)
+        y = tiles // 18 + 0.5
+        x = tiles % 18 + 0.5
+        if player_id == 1:
+            x = 18 - x
+            y = 32 - y
+
+        occupied = np.zeros(32 * 18, dtype=np.bool_)
+        for building_x, building_y, radius in self.battle.building_positions:
+            occupied |= ((x - building_x) ** 2 + (y - building_y) ** 2
+                         < radius ** 2)
+
+        for slot, card_name in enumerate(self.battle.players[player_id].cycle[:4]):
+            if not self.battle.players[player_id].can_play_card(card_name):
+                continue
+            if Card(card_name).type == "spell":
+                mask[slot] = True
+                continue
+            valid = ~occupied
+            if player_id == 0:
+                valid &= ~((y <= 1.0) & ((x <= 6.0) | (x > 12.0)))
+                valid &= y < 21.0
+                if self.battle.players[1].left_tower_hp > 0:
+                    valid &= ~((y >= 15.0) & (x <= 9.0))
+                if self.battle.players[1].right_tower_hp > 0:
+                    valid &= ~((y >= 15.0) & (x > 9.0))
+            else:
+                valid &= ~((y > 31.0) & ((x <= 6.0) | (x > 12.0)))
+                valid &= y > 10.0
+                if self.battle.players[0].left_tower_hp > 0:
+                    valid &= ~((y <= 17.0) & (x <= 9.0))
+                if self.battle.players[0].right_tower_hp > 0:
+                    valid &= ~((y <= 17.0) & (x > 9.0))
+            mask[slot] = valid
+        return mask
+
     def opponent_action(self):
         obs1 = self.observe(1)
         slot, y, x = self.decode_action(self.opponent(obs1))
         p1 = self.battle.players[1]
         if slot != 0:
             card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, Position(18-(x+0.5), 32-(y+0.5)))
+            self.battle.deploy_card(1, card_name, self.action_position(1, y, x))
             # Yes, this transformation seems weird, but it should be correct
 
 
@@ -119,11 +199,12 @@ class CREnv(gym.Env):
         red_left = 3-p1.get_crown_count()
 
         slot, y, x = self.decode_action(action)
+        deployment_succeeded = slot == 0
         if slot != 0:
             card_name = p0.cycle[slot-1]
-            success = self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
-            if not success:
-                print("Invalid deployment")
+            deployment_succeeded = self.battle.deploy_card(
+                0, card_name, self.action_position(0, y, x)
+            )
 
         self.opponent_action()
         # only make decisions per half second
@@ -149,7 +230,11 @@ class CREnv(gym.Env):
             else:
                 reward -= 10
 
-        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
+        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
+            "deployment_succeeded": deployment_succeeded,
+            "no_op": slot == 0,
+            "winner": self.battle.winner,
+        }
 
 
     def observe(self, player_id_observe=0):
@@ -233,14 +318,60 @@ class CREnv(gym.Env):
             "entity_mask": entity_mask,
             "hand": np.asarray(hand, dtype=np.int64),
             "hand_mask": np.asarray(hand_mask, dtype=np.bool_),
+            "placement_mask": self.placement_mask(player_id_observe),
             "state": np.asarray(state, dtype=np.float32),
         }
 
 
+def legal_random_strategy(observation):
+    playable = np.flatnonzero(observation["hand_mask"][:4])
+    if len(playable) == 0 or np.random.random() < 0.2:
+        return 0, 0
+    slot = int(np.random.choice(playable))
+    tiles = np.flatnonzero(observation["placement_mask"][slot])
+    return slot + 1, int(np.random.choice(tiles))
+
+
+def patient_random_strategy(observation):
+    if observation["state"][1] < 0.7:
+        return 0, 0
+    return legal_random_strategy(observation)
+
+
+def bridge_random_strategy(observation):
+    playable = np.flatnonzero(observation["hand_mask"][:4])
+    if len(playable) == 0:
+        return 0, 0
+    slot = int(np.random.choice(playable))
+    tiles = np.flatnonzero(observation["placement_mask"][slot])
+    rows = tiles // 18
+    candidates = tiles[rows >= rows.max() - 2]
+    return slot + 1, int(np.random.choice(candidates))
+
+
+def defensive_random_strategy(observation):
+    playable = np.flatnonzero(observation["hand_mask"][:4])
+    if len(playable) == 0:
+        return 0, 0
+    slot = int(np.random.choice(playable))
+    tiles = np.flatnonzero(observation["placement_mask"][slot])
+    rows = tiles // 18
+    candidates = tiles[rows <= rows.min() + 6]
+    return slot + 1, int(np.random.choice(candidates))
+
+
+def mixed_random_strategy(observation):
+    strategy = np.random.choice([
+        legal_random_strategy,
+        patient_random_strategy,
+        bridge_random_strategy,
+        defensive_random_strategy,
+    ])
+    return strategy(observation)
+
+
 def random_strategy(observation):
-    slot = randint(0, 4)
-    tile = randint(0, 32 * 18 - 1)
-    return slot, tile
+    return legal_random_strategy(observation)
 
 if __name__ == '__main__':
     env = CREnv(random_strategy)

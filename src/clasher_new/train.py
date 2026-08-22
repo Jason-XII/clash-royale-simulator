@@ -1,15 +1,26 @@
-from environment import CREnv, random_strategy, entity_names
+from environment import (
+    CREnv,
+    bridge_random_strategy,
+    defensive_random_strategy,
+    entity_names,
+    legal_random_strategy,
+    mixed_random_strategy,
+    patient_random_strategy,
+)
 
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.distributions import Distribution
 from stable_baselines3.common.policies import ActorCriticPolicy
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import os
+import random
+from pathlib import Path
 
 import time
 
@@ -93,10 +104,25 @@ class AutoregressiveDistribution(Distribution):
     def proba_distribution_net(self, latent_dim):
         return FactorizedActionNet(latent_dim)
 
-    def proba_distribution(self, action_logits, card_mask=None):
+    def proba_distribution(self, action_logits, card_mask=None, placement_mask=None):
         card_logits, y_logits, x_logits = action_logits
         if card_mask is not None:
             card_logits = card_logits.masked_fill(~card_mask, -torch.inf)
+        if placement_mask is not None:
+            no_op_mask = torch.ones(
+                (placement_mask.shape[0], 1, 32 * 18),
+                dtype=torch.bool,
+                device=placement_mask.device,
+            )
+            tile_mask = torch.cat([no_op_mask, placement_mask], dim=1)
+            tile_mask = tile_mask.view(-1, 5, 32, 18)
+            valid_y = tile_mask.any(dim=-1)
+            y_logits = y_logits.masked_fill(~valid_y, -torch.inf)
+            x_logits = x_logits.masked_fill(~tile_mask, -torch.inf)
+            y_logits = torch.where(valid_y, y_logits, torch.zeros_like(y_logits))
+            x_logits = torch.where(
+                valid_y.unsqueeze(-1), x_logits, torch.zeros_like(x_logits)
+            )
         self.card_distribution = torch.distributions.Categorical(logits=card_logits)
         self.y_logits = y_logits
         self.x_logits = x_logits
@@ -173,9 +199,10 @@ class CRAutoregressivePolicy(ActorCriticPolicy):
             self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
         )
 
-    def _get_action_dist_from_latent(self, latent_pi, card_mask=None):
+    def _get_action_dist_from_latent(
+            self, latent_pi, card_mask=None, placement_mask=None):
         return self.action_dist.proba_distribution(
-            self.action_net(latent_pi), card_mask
+            self.action_net(latent_pi), card_mask, placement_mask
         )
 
     def forward(self, obs, deterministic=False):
@@ -189,7 +216,9 @@ class CRAutoregressivePolicy(ActorCriticPolicy):
             ],
             dim=1,
         ).bool()
-        distribution = self._get_action_dist_from_latent(latent_pi, card_mask)
+        distribution = self._get_action_dist_from_latent(
+            latent_pi, card_mask, obs["placement_mask"].bool()
+        )
         actions = distribution.get_actions(deterministic=deterministic)
         return actions, values, distribution.log_prob(actions)
 
@@ -203,7 +232,9 @@ class CRAutoregressivePolicy(ActorCriticPolicy):
             ],
             dim=1,
         ).bool()
-        distribution = self._get_action_dist_from_latent(latent_pi, card_mask)
+        distribution = self._get_action_dist_from_latent(
+            latent_pi, card_mask, obs["placement_mask"].bool()
+        )
         return (
             self.value_net(latent_vf),
             distribution.log_prob(actions),
@@ -220,7 +251,9 @@ class CRAutoregressivePolicy(ActorCriticPolicy):
             ],
             dim=1,
         ).bool()
-        return self._get_action_dist_from_latent(latent_pi, card_mask)
+        return self._get_action_dist_from_latent(
+            latent_pi, card_mask, obs["placement_mask"].bool()
+        )
 
 
 class WeightsCopyingCallback(BaseCallback):
@@ -233,32 +266,84 @@ class WeightsCopyingCallback(BaseCallback):
         return True
 
 class RandomEvalCallback(BaseCallback):
-    def __init__(self, verbose=0):
+    def __init__(self, eval_freq=20_000, n_eval_episodes=50, verbose=0):
         super().__init__(verbose)
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self.last_eval = 0
+        self.best_win_rate = -1.0
+        self.strategies = [
+            legal_random_strategy,
+            patient_random_strategy,
+            bridge_random_strategy,
+            defensive_random_strategy,
+            mixed_random_strategy,
+        ]
+        Path("cr_logs/best").mkdir(parents=True, exist_ok=True)
 
-    def _on_step(self) -> bool:
-        if self.num_timesteps % 50000 == 0:
-            rewards = []
-            eval_env = CREnv(opponent_model=lambda obs: random_strategy(obs))
-            for i in range(5):
-                obs, _ = eval_env.reset()
-                done = False
-                total_reward = 0
-                while not done:
-                    action, _ = self.model.predict(obs)
-                    obs, reward, termination, truncation, info = eval_env.step(action)
-                    done = termination or truncation
-                    total_reward += reward
+    def _on_step(self):
+        if self.num_timesteps - self.last_eval < self.eval_freq:
+            return True
+        self.last_eval = self.num_timesteps
+        wins = 0
+        rewards = []
+        no_ops = 0
+        invalid = 0
+        decisions = 0
 
-                rewards.append(total_reward)
-            self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
+        for episode in range(self.n_eval_episodes):
+            eval_env = CREnv(self.strategies[episode % len(self.strategies)])
+            obs, _ = eval_env.reset(seed=episode)
+            total_reward = 0.0
+            done = False
+            while not done:
+                action, _ = self.model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = eval_env.step(action)
+                total_reward += reward
+                decisions += 1
+                no_ops += int(info["no_op"])
+                invalid += int(not info["no_op"] and not info["deployment_succeeded"])
+                done = terminated or truncated
+            wins += int(eval_env.battle.winner == 0)
+            rewards.append(total_reward)
+            eval_env.close()
+
+        win_rate = wins / self.n_eval_episodes
+        self.logger.record("eval/win_rate", win_rate)
+        self.logger.record("eval/mean_reward", sum(rewards) / len(rewards))
+        self.logger.record("eval/no_op_rate", no_ops / decisions)
+        self.logger.record("eval/invalid_deployment_rate", invalid / decisions)
+        if win_rate > self.best_win_rate:
+            self.best_win_rate = win_rate
+            self.model.save("cr_logs/best/best_model")
         return True
 
 
-if __name__ == "__main__":
-    env = CREnv(opponent_model=random_strategy)
+def make_env(rank):
+    strategies = [
+        legal_random_strategy,
+        patient_random_strategy,
+        bridge_random_strategy,
+        defensive_random_strategy,
+    ]
 
-    checkpoint = "cr_checkpoint"
+    def factory():
+        random.seed(10_000 + rank)
+        torch.manual_seed(10_000 + rank)
+        return CREnv(strategies[rank % len(strategies)])
+
+    return factory
+
+
+if __name__ == "__main__":
+    n_envs = int(os.environ.get("N_ENVS", min(8, os.cpu_count() or 1)))
+    env = SubprocVecEnv(
+        [make_env(rank) for rank in range(n_envs)],
+        start_method="spawn",
+    )
+    env = VecMonitor(env)
+
+    checkpoint = "factorized_masked_checkpoint"
     policy_kwargs = {
         "features_extractor_class": CRTransformerExtractor,
         "net_arch": {"pi": [], "vf": []},
@@ -271,24 +356,28 @@ if __name__ == "__main__":
             CRAutoregressivePolicy,
             env,
             policy_kwargs=policy_kwargs,
-            n_steps=2048,
-            batch_size=64,
-            ent_coef=0.01,
+            n_steps=512,
+            batch_size=256,
+            ent_coef=0.005,
+            clip_range=0.1,
+            learning_rate=1e-4,
             verbose=1,
             tensorboard_log="./cr_logs/tensorboard/",
         )
 
-    cb = CheckpointCallback(
-        save_freq=10_000,
+    checkpoint_callback = CheckpointCallback(
+        save_freq=max(10_000 // n_envs, 1),
         save_path="./cr_logs/",
-        name_prefix="cr",
+        name_prefix="factorized_masked",
     )
+    eval_callback = RandomEvalCallback(eval_freq=20_000, n_eval_episodes=50)
 
     try:
         model.learn(
             total_timesteps=1_000_000,
             reset_num_timesteps=False,
-            callback=cb,
+            callback=[checkpoint_callback, eval_callback],
         )
     finally:
-        model.save("cr_checkpoint")
+        model.save(checkpoint)
+        env.close()
