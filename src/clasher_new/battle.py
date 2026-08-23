@@ -1,6 +1,6 @@
 from core import BlankEntity
 from player import PlayerState
-from pathfinding_heap import EntityPathfinder
+from pathfinding_heap import EntityPathfinder, position_to_cell, cell_to_position
 from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
 import math
@@ -525,6 +525,8 @@ class BattleState:
 
         self.schedule = []
         self.building_positions = []
+        self.building_cache = None
+        self.cache_fresh = False
 
     def in_river(self, position):
         river_tiles = [(0, 15), (0, 16), (1, 15), (1, 16),
@@ -566,6 +568,7 @@ class BattleState:
         if card_name in spells:
             return Entity(*entity_data)
         elif card_name in buildings:
+            self.cache_fresh = False
             return Building(*entity_data)
         else:
             return Troop(*entity_data)
@@ -621,6 +624,9 @@ class BattleState:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         self.entities = {key:value for key,value in self.entities.items() if (value.is_alive or key <= 6)}
         self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building)]
+        if not self.cache_fresh:
+            self.calculate_building_cache()
+            self.cache_fresh = True
         for entity in list(self.entities.values()):
             entity.update(dt)
             self.ensure_walkability(entity)
@@ -679,6 +685,23 @@ class BattleState:
         self.players[player_id].play_card(card_name)
         return True
 
+    def calculate_building_cache(self):
+        self.building_cache = []
+        for x_cell in range(0, 36):
+            self.building_cache.append([])
+            for y_cell in range(0, 64):
+                self.building_cache[x_cell].append(float('inf'))
+        for x_cell in range(0, 36):
+            for y_cell in range(0, 64):
+                pos = cell_to_position((x_cell, y_cell))
+                m = min(self.building_positions, key=lambda x: math.sqrt((pos.x-x[0])**2+(pos.y-x[1])**2)-x[2])
+                minimum_distance = math.sqrt((pos.x-m[0])**2+(pos.y-m[1])**2)-m[2]
+                self.building_cache[x_cell][y_cell] = minimum_distance
+    def pathfind_ground_walkable(self, position, mover_radius):
+        if not self.arena.is_walkable(position): return False
+        x, y = position_to_cell(position)
+        return self.building_cache[x][y] > mover_radius
+
     def ground_walkable(self, position, mover_radius):
         if not self.arena.is_walkable(position): return False
         return not self.is_position_occupied_by_building(position, mover_radius)
@@ -716,6 +739,7 @@ class BattleState:
                 if each.name == 'KingTower' and each.player == player:
                     each.tower_active = True
                     break
+        if isinstance(entity, Building): self.cache_fresh = False
 
     def deal_area_damage(self, from_player, position, range, amount, attack_air, attack_ground, crown_tower_damage_percent=1.0):
         for entity in self.entities.values():

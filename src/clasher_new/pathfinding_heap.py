@@ -61,7 +61,7 @@ class EntityPathfinder:
             for y in range(target_cell[1]-scan_radius, target_cell[1]+scan_radius):
                 distance = cell_to_position((x, y)).distance_to(self.target_position)
                 # I added 0.375 to radius so that short-ranged troops like lumberjack can reach the tower instead of leering to the side
-                if distance < radius+0.375 and self.battle.ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
+                if distance < radius+0.375 and self.battle.pathfind_ground_walkable(cell_to_position((x, y)), self.entity.data.collision_radius):
                     self.goals.add((x, y))
         # The second step is to filter goals, only keep the closest one.
         self.goal = min(self.goals, key=lambda c: cell_to_position(c).distance_to(self.target_position)+cell_to_position(c).distance_to(self.start_position))
@@ -86,7 +86,7 @@ class EntityPathfinder:
             for neighbor in get_neighboring_points(current[0], current[1]):
                 if neighbor in closed_set: continue
                 neighbor_position = cell_to_position(neighbor)
-                if not self.battle.ground_walkable(neighbor_position, self.entity.data.collision_radius):
+                if not self.battle.pathfind_ground_walkable(neighbor_position, self.entity.data.collision_radius):
                     continue
                 nx, ny = neighbor
                 px, py = current
