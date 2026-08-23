@@ -2,8 +2,8 @@
 
 The policy deliberately uses a small permutation-invariant set encoder. Entities are
 an unordered collection. Placement is hierarchical: the 32x18 arena is split into
-6x4 regions of 3x8 cells, so the policy learns a meaningful region before a local
-cell while the external action remains the original (slot, tile) pair.
+6x4 regions of 3x8 cells. The policy learns the card and coarse region, then samples
+uniformly from legal cells in that region. The external action remains (slot, tile).
 """
 from environment import (
     CREnv, bridge_random_strategy, defensive_random_strategy,
@@ -54,89 +54,75 @@ class CRSetExtractor(BaseFeaturesExtractor):
         return self.head(torch.cat((mean, masked, hand, obs["state"].float()), dim=-1))
 
 
-class HierarchicalActionNet(nn.Module):
+class CoarseRegionActionNet(nn.Module):
     n_cards = 5
     n_regions = 24
-    n_cells = 24
 
     def __init__(self, latent_dim):
         super().__init__()
         self.card = nn.Linear(latent_dim, self.n_cards)
         self.region = nn.Linear(latent_dim, self.n_cards * self.n_regions)
-        self.cell = nn.Sequential(
-            nn.Linear(latent_dim, 256), nn.Tanh(),
-            nn.Linear(256, self.n_cards * self.n_regions * self.n_cells),
-        )
 
     def forward(self, latent):
         batch = latent.shape[0]
         return (
             self.card(latent),
             self.region(latent).view(batch, self.n_cards, self.n_regions),
-            self.cell(latent).view(batch, self.n_cards, self.n_regions, self.n_cells),
         )
 
 
-class HierarchicalActionDistribution(Distribution):
+class CoarseRegionActionDistribution(Distribution):
+    """Learn card/region decisions and uniformly sample a legal cell."""
     n_regions = 24
     n_cells = 24
 
     def proba_distribution_net(self, latent_dim):
-        return HierarchicalActionNet(latent_dim)
+        return CoarseRegionActionNet(latent_dim)
 
     def proba_distribution(self, params, card_mask=None, placement_mask=None):
-        card_logits, region_logits, cell_logits = params
+        card_logits, region_logits = params
         if card_mask is not None:
             card_logits = card_logits.masked_fill(~card_mask, -torch.inf)
         self.card_distribution = torch.distributions.Categorical(logits=card_logits)
 
+        batch = region_logits.shape[0]
         if placement_mask is None:
-            region_mask = torch.ones_like(region_logits, dtype=torch.bool)
-            cell_mask = torch.ones_like(cell_logits, dtype=torch.bool)
+            cell_mask = torch.ones(
+                (batch, 4, self.n_regions, self.n_cells),
+                dtype=torch.bool,
+                device=region_logits.device,
+            )
         else:
-            # Tile y/x -> region (6 columns x 4 rows) and local cell (3 x 8).
-            batch = placement_mask.shape[0]
+            # Flattened tiles use y * 18 + x. Regroup them as
+            # [region_y, region_x, local_y, local_x].
             mask = placement_mask.view(batch, 4, 4, 8, 6, 3)
             mask = mask.permute(0, 1, 2, 4, 3, 5)
             cell_mask = mask.reshape(batch, 4, self.n_regions, self.n_cells)
-            region_mask = cell_mask.any(dim=-1)
-            no_op_region = torch.ones((cell_mask.shape[0], 1, self.n_regions),
-                                      dtype=torch.bool, device=cell_mask.device)
-            no_op_cell = torch.ones((cell_mask.shape[0], 1, self.n_regions, self.n_cells),
-                                    dtype=torch.bool, device=cell_mask.device)
-            region_mask = torch.cat((no_op_region, region_mask), dim=1)
-            cell_mask = torch.cat((no_op_cell, cell_mask), dim=1)
 
-        region_logits = region_logits.masked_fill(~region_mask, -torch.inf)
-        cell_logits = cell_logits.masked_fill(~cell_mask, -torch.inf)
-        # Unplayable cards have no valid region/cell. Their card probability is
-        # zero, but finite logits are required for stable entropy calculation.
-        region_logits = torch.where(region_mask.any(dim=-1, keepdim=True), region_logits,
-                                    torch.zeros_like(region_logits))
-        cell_logits = torch.where(cell_mask.any(dim=-1, keepdim=True), cell_logits,
-                                  torch.zeros_like(cell_logits))
-        self.region_logits, self.cell_logits = region_logits, cell_logits
+        region_mask = cell_mask.any(dim=-1)
+        # No-op has no meaningful region. Giving it one fixed region makes its
+        # conditional entropy and log probability exactly zero.
+        no_op_region = torch.zeros(
+            (batch, 1, self.n_regions), dtype=torch.bool, device=region_logits.device
+        )
+        no_op_region[..., 0] = True
+        no_op_cell = torch.zeros(
+            (batch, 1, self.n_regions, self.n_cells),
+            dtype=torch.bool,
+            device=region_logits.device,
+        )
+        no_op_cell[..., 0, 0] = True
+        self.region_mask = torch.cat((no_op_region, region_mask), dim=1)
+        self.cell_mask = torch.cat((no_op_cell, cell_mask), dim=1)
+
+        region_logits = region_logits.masked_fill(~self.region_mask, -torch.inf)
+        region_logits = torch.where(
+            self.region_mask.any(dim=-1, keepdim=True),
+            region_logits,
+            torch.zeros_like(region_logits),
+        )
+        self.region_logits = region_logits
         return self
-
-    def _indices(self, cards, regions=None):
-        rows = torch.arange(cards.shape[0], device=cards.device)
-        if regions is None:
-            return rows, cards
-        return rows, cards, regions
-
-    def _region_distribution(self, cards):
-        rows, cards = self._indices(cards)
-        return torch.distributions.Categorical(logits=self.region_logits[rows, cards])
-
-    def _cell_distribution(self, cards, regions):
-        rows, cards, regions = self._indices(cards, regions)
-        return torch.distributions.Categorical(logits=self.cell_logits[rows, cards, regions])
-
-    @staticmethod
-    def _cell_to_tile(regions, cells):
-        region_y, region_x = regions // 6, regions % 6
-        local_y, local_x = cells // 3, cells % 3
-        return (region_y * 8 + local_y) * 18 + region_x * 3 + local_x
 
     @staticmethod
     def _tile_to_indices(tiles):
@@ -145,33 +131,59 @@ class HierarchicalActionDistribution(Distribution):
         cells = (y % 8) * 3 + x % 3
         return regions, cells
 
+    @staticmethod
+    def _cell_to_tile(regions, cells):
+        region_y, region_x = regions // 6, regions % 6
+        local_y, local_x = cells // 3, cells % 3
+        return (region_y * 8 + local_y) * 18 + region_x * 3 + local_x
+
+    @staticmethod
+    def _batch_indices(cards):
+        return torch.arange(cards.shape[0], device=cards.device)
+
+    def _region_distribution(self, cards):
+        rows = self._batch_indices(cards)
+        return torch.distributions.Categorical(logits=self.region_logits[rows, cards])
+
+    def _selected_cell_mask(self, cards, regions):
+        rows = self._batch_indices(cards)
+        return self.cell_mask[rows, cards, regions]
+
+    def _sample_cells(self, cards, regions):
+        mask = self._selected_cell_mask(cards, regions)
+        return torch.distributions.Categorical(probs=mask.float()).sample()
+
+    def _mode_cells(self, cards, regions):
+        # The first legal cell gives deterministic evaluation reproducibility.
+        return self._selected_cell_mask(cards, regions).float().argmax(dim=-1)
+
     def log_prob(self, actions):
         cards, tiles = actions[:, 0].long(), actions[:, 1].long()
         active = (cards != 0).float()
-        regions, cells = self._tile_to_indices(tiles)
-        return (self.card_distribution.log_prob(cards)
-                + active * self._region_distribution(cards).log_prob(regions)
-                + active * self._cell_distribution(cards, regions).log_prob(cells))
+        regions, _ = self._tile_to_indices(tiles)
+        region_log_prob = self._region_distribution(cards).log_prob(regions)
+        legal_cell_count = self._selected_cell_mask(cards, regions).sum(dim=-1).clamp_min(1)
+        cell_log_prob = -torch.log(legal_cell_count.float())
+        return self.card_distribution.log_prob(cards) + active * (region_log_prob + cell_log_prob)
 
     def entropy(self):
         card_probs = self.card_distribution.probs
-        region_dist = torch.distributions.Categorical(logits=self.region_logits)
-        cell_dist = torch.distributions.Categorical(logits=self.cell_logits)
-        region_probs = region_dist.probs
-        conditional = region_dist.entropy() + (region_probs * cell_dist.entropy()).sum(dim=-1)
-        return self.card_distribution.entropy() + (card_probs * conditional).sum(dim=-1)
+        region_entropy = torch.distributions.Categorical(logits=self.region_logits).entropy()
+        # Uniform fine-cell selection is execution noise, not a learned choice.
+        # Excluding it avoids rewarding regions solely for containing more cells.
+        return self.card_distribution.entropy() + (card_probs * region_entropy).sum(dim=-1)
 
     def sample(self):
         cards = self.card_distribution.sample()
         regions = self._region_distribution(cards).sample()
-        cells = self._cell_distribution(cards, regions).sample()
+        cells = self._sample_cells(cards, regions)
         tiles = self._cell_to_tile(regions, cells)
         return torch.stack((cards, tiles * (cards != 0)), dim=1)
 
     def mode(self):
         cards = self.card_distribution.probs.argmax(dim=1)
         regions = self._region_distribution(cards).probs.argmax(dim=1)
-        cells = self._cell_distribution(cards, regions).probs.argmax(dim=1)
+        cells = self._mode_cells(cards, regions)
         tiles = self._cell_to_tile(regions, cells)
         return torch.stack((cards, tiles * (cards != 0)), dim=1)
 
@@ -187,7 +199,7 @@ class HierarchicalActionDistribution(Distribution):
 class CRPolicy(ActorCriticPolicy):
     def _build(self, lr_schedule):
         self._build_mlp_extractor()
-        self.action_dist = HierarchicalActionDistribution()
+        self.action_dist = CoarseRegionActionDistribution()
         self.action_net = self.action_dist.proba_distribution_net(self.mlp_extractor.latent_dim_pi)
         self.value_net = nn.Linear(self.mlp_extractor.latent_dim_vf, 1)
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
@@ -258,7 +270,7 @@ def make_env(rank):
 if __name__ == "__main__":
     n_envs = int(os.environ.get("N_ENVS", min(4, os.cpu_count() or 1)))
     vec_env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(n_envs)], start_method="spawn"))
-    checkpoint = os.environ.get("CHECKPOINT", "hierarchical_masked_checkpoint")
+    checkpoint = os.environ.get("CHECKPOINT", "coarse_region_checkpoint")
     kwargs = {"features_extractor_class": CRSetExtractor, "net_arch": {"pi": [], "vf": []}}
     model = PPO(
         CRPolicy, vec_env, policy_kwargs=kwargs, n_steps=256, batch_size=256,
@@ -268,7 +280,7 @@ if __name__ == "__main__":
     )
     try:
         model.learn(total_timesteps=int(os.environ.get("TOTAL_STEPS", "1000000")),
-                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="hierarchical_masked"), EvalCallback()])
+                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="coarse_region"), EvalCallback()])
     finally:
         model.save(checkpoint)
         vec_env.close()
