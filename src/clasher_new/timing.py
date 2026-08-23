@@ -1,27 +1,20 @@
-from environment import CREnv, random_strategy, entity_names
-import time
-from stable_baselines3 import PPO
-from train import CRTransformerExtractor
-from stable_baselines3.common.vec_env import SubprocVecEnv
+"""
+Time how much time pure simulation can speed up compared to real games.
+"""
+import battle, player
+from core import Position
+import random, time
 
-def make_env():
-    return CREnv(opponent_model=lambda obs: random_strategy(obs))
+player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
+player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
 
-if __name__ == '__main__':
-    env = make_env()
-    t0 = time.time()
-    t_irl = 0
-    for i in range(10):
-        state, _ = env.reset()
-        running = True
-        # model = PPO('MultiInputPolicy', env, policy_kwargs={"features_extractor_class": CRFeatureExtractor},
-        #             verbose=1, tensorboard_log="./cr_logs")
-        # model.save('cr_discrete')
-        while running:
-            # print(time.time() -t0)
-            state, reward, termination, truncation, info = env.step(random_strategy(state))
-            running = not (termination or truncation)
-        print('game')
-        t_irl += env.battle.time
-    t1 = time.time()
-    print( t_irl, t1-t0, f'\n The simulator is {t_irl/(t1-t0)}x faster than real time.')
+b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
+                       player.PlayerState(1, player_1_deck, 10))
+
+t0 = time.time()
+while not b.game_over:
+    player_id = random.randint(0, 1)
+    b.deploy_card(player_id, random.choice(b.players[player_id].cycle[:4]), Position(random.randint(0, 17), random.randint(0,31)))
+    b.step(1/60)
+t1 = time.time()
+print(t1-t0, b.time/(t1-t0))
