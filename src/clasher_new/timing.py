@@ -10,7 +10,7 @@ player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireba
 
 b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
                        player.PlayerState(1, player_1_deck, 10))
-
+random.seed(0)
 t0 = time.time()
 while not b.game_over:
     player_id = random.randint(0, 1)

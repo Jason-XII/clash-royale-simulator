@@ -187,7 +187,7 @@ class Entity:
         else:
             current_target = self.battle_state.entities.get(self.target_id)
             if not self.in_sight_range(current_target):
-                if 'PrincessTower' not in current_target.name:
+                if 'PrincessTower' not in current_target.name and 'KingTower' not in current_target.name:
                     self.path = []
                 current_target = None
                 self.target_id = None
@@ -300,7 +300,7 @@ class Troop(Entity):
             else:
                 if not self.path:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-                elif self.in_sight_range(current_target) and self.battle_state.tick % 3 == 0:
+                elif self.in_sight_range(current_target) and self.battle_state.tick % 10 == 0:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
 
                 # determine the next waypoint and move towards that waypoint
