@@ -164,7 +164,7 @@ class Entity:
         if self.data.target_only_buildings and not isinstance(new_target, Building): return False
         if not new_target:
             return True
-        if self.position.distance_to(current_target.position) <= self.data.range + current_target.data.collision_radius + self.data.collision_radius:
+        if self.in_attack_range(current_target):
             return False
         # Always switch to troops in sight range (higher priority than buildings)
         is_current_building = isinstance(current_target, Building)

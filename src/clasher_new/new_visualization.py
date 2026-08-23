@@ -132,6 +132,6 @@ schedule2 = [('MiniPekka', (12.5, 18.5), 1, 0),
 
 if __name__ == "__main__":
     v = Visualizer()
-    for each in schedule2:
+    for each in schedule:
         v.deploy(*each)
     v.run()
