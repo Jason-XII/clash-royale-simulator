@@ -54,33 +54,56 @@ class CRSetExtractor(BaseFeaturesExtractor):
         return self.head(torch.cat((mean, masked, hand, obs["state"].float()), dim=-1))
 
 
-class CoarseRegionActionNet(nn.Module):
+class AutoregressiveActionNet(nn.Module):
+    """Predict card, region, and shared conditional local-cell logits."""
     n_cards = 5
     n_regions = 24
+    n_cells = 24
 
     def __init__(self, latent_dim):
         super().__init__()
         self.card = nn.Linear(latent_dim, self.n_cards)
         self.region = nn.Linear(latent_dim, self.n_cards * self.n_regions)
+        self.context = nn.Sequential(nn.Linear(latent_dim, 128), nn.Tanh())
+        self.card_embedding = nn.Embedding(self.n_cards, 16)
+        self.region_embedding = nn.Embedding(self.n_regions, 16)
+        self.cell = nn.Sequential(
+            nn.Linear(128 + 16 + 16, 128), nn.Tanh(), nn.Linear(128, self.n_cells)
+        )
 
     def forward(self, latent):
         batch = latent.shape[0]
-        return (
-            self.card(latent),
-            self.region(latent).view(batch, self.n_cards, self.n_regions),
+        card_logits = self.card(latent)
+        region_logits = self.region(latent).view(batch, self.n_cards, self.n_regions)
+        context = self.context(latent)[:, None, None, :].expand(
+            batch, self.n_cards, self.n_regions, -1
         )
+        cards = torch.arange(self.n_cards, device=latent.device)[None, :, None].expand(
+            batch, self.n_cards, self.n_regions
+        )
+        regions = torch.arange(self.n_regions, device=latent.device)[None, None, :].expand(
+            batch, self.n_cards, self.n_regions
+        )
+        cell_input = torch.cat((
+            context,
+            self.card_embedding(cards),
+            self.region_embedding(regions),
+        ), dim=-1)
+        cell_logits = self.cell(cell_input)
+        return card_logits, region_logits, cell_logits
 
 
-class CoarseRegionActionDistribution(Distribution):
-    """Learn card/region decisions and uniformly sample a legal cell."""
+class AutoregressiveActionDistribution(Distribution):
+    """Learn card -> region -> exact legal local-cell decisions."""
+    n_cards = 5
     n_regions = 24
     n_cells = 24
 
     def proba_distribution_net(self, latent_dim):
-        return CoarseRegionActionNet(latent_dim)
+        return AutoregressiveActionNet(latent_dim)
 
     def proba_distribution(self, params, card_mask=None, placement_mask=None):
-        card_logits, region_logits = params
+        card_logits, region_logits, cell_logits = params
         if card_mask is not None:
             card_logits = card_logits.masked_fill(~card_mask, -torch.inf)
         self.card_distribution = torch.distributions.Categorical(logits=card_logits)
@@ -89,47 +112,47 @@ class CoarseRegionActionDistribution(Distribution):
         if placement_mask is None:
             cell_mask = torch.ones(
                 (batch, 4, self.n_regions, self.n_cells),
-                dtype=torch.bool,
-                device=region_logits.device,
+                dtype=torch.bool, device=region_logits.device
             )
         else:
-            # Flattened tiles use y * 18 + x. Regroup them as
-            # [region_y, region_x, local_y, local_x].
             mask = placement_mask.view(batch, 4, 4, 8, 6, 3)
             mask = mask.permute(0, 1, 2, 4, 3, 5)
             cell_mask = mask.reshape(batch, 4, self.n_regions, self.n_cells)
 
         region_mask = cell_mask.any(dim=-1)
-        # No-op has no meaningful region. Giving it one fixed region makes its
-        # conditional entropy and log probability exactly zero.
+        # Give no-op a single fixed conditional outcome, whose log probability
+        # and entropy are zero. Active cards retain their legal masks.
         no_op_region = torch.zeros(
             (batch, 1, self.n_regions), dtype=torch.bool, device=region_logits.device
         )
         no_op_region[..., 0] = True
         no_op_cell = torch.zeros(
             (batch, 1, self.n_regions, self.n_cells),
-            dtype=torch.bool,
-            device=region_logits.device,
+            dtype=torch.bool, device=region_logits.device
         )
         no_op_cell[..., 0, 0] = True
         self.region_mask = torch.cat((no_op_region, region_mask), dim=1)
         self.cell_mask = torch.cat((no_op_cell, cell_mask), dim=1)
 
         region_logits = region_logits.masked_fill(~self.region_mask, -torch.inf)
+        cell_logits = cell_logits.masked_fill(~self.cell_mask, -torch.inf)
+        # Fully unavailable card rows have zero card probability, but must stay
+        # finite so Categorical entropy remains well-defined.
         region_logits = torch.where(
-            self.region_mask.any(dim=-1, keepdim=True),
-            region_logits,
-            torch.zeros_like(region_logits),
+            self.region_mask.any(dim=-1, keepdim=True), region_logits,
+            torch.zeros_like(region_logits)
         )
-        self.region_logits = region_logits
+        cell_logits = torch.where(
+            self.cell_mask.any(dim=-1, keepdim=True), cell_logits,
+            torch.zeros_like(cell_logits)
+        )
+        self.region_logits, self.cell_logits = region_logits, cell_logits
         return self
 
     @staticmethod
     def _tile_to_indices(tiles):
         y, x = tiles // 18, tiles % 18
-        regions = (y // 8) * 6 + x // 3
-        cells = (y % 8) * 3 + x % 3
-        return regions, cells
+        return (y // 8) * 6 + x // 3, (y % 8) * 3 + x % 3
 
     @staticmethod
     def _cell_to_tile(regions, cells):
@@ -138,52 +161,51 @@ class CoarseRegionActionDistribution(Distribution):
         return (region_y * 8 + local_y) * 18 + region_x * 3 + local_x
 
     @staticmethod
-    def _batch_indices(cards):
+    def _rows(cards):
         return torch.arange(cards.shape[0], device=cards.device)
 
     def _region_distribution(self, cards):
-        rows = self._batch_indices(cards)
-        return torch.distributions.Categorical(logits=self.region_logits[rows, cards])
+        return torch.distributions.Categorical(
+            logits=self.region_logits[self._rows(cards), cards]
+        )
 
-    def _selected_cell_mask(self, cards, regions):
-        rows = self._batch_indices(cards)
-        return self.cell_mask[rows, cards, regions]
-
-    def _sample_cells(self, cards, regions):
-        mask = self._selected_cell_mask(cards, regions)
-        return torch.distributions.Categorical(probs=mask.float()).sample()
-
-    def _mode_cells(self, cards, regions):
-        # The first legal cell gives deterministic evaluation reproducibility.
-        return self._selected_cell_mask(cards, regions).float().argmax(dim=-1)
+    def _cell_distribution(self, cards, regions):
+        return torch.distributions.Categorical(
+            logits=self.cell_logits[self._rows(cards), cards, regions]
+        )
 
     def log_prob(self, actions):
         cards, tiles = actions[:, 0].long(), actions[:, 1].long()
         active = (cards != 0).float()
-        regions, _ = self._tile_to_indices(tiles)
-        region_log_prob = self._region_distribution(cards).log_prob(regions)
-        legal_cell_count = self._selected_cell_mask(cards, regions).sum(dim=-1).clamp_min(1)
-        cell_log_prob = -torch.log(legal_cell_count.float())
-        return self.card_distribution.log_prob(cards) + active * (region_log_prob + cell_log_prob)
+        regions, cells = self._tile_to_indices(tiles)
+        return (
+            self.card_distribution.log_prob(cards)
+            + active * self._region_distribution(cards).log_prob(regions)
+            + active * self._cell_distribution(cards, regions).log_prob(cells)
+        )
 
     def entropy(self):
         card_probs = self.card_distribution.probs
-        region_entropy = torch.distributions.Categorical(logits=self.region_logits).entropy()
-        # Uniform fine-cell selection is execution noise, not a learned choice.
-        # Excluding it avoids rewarding regions solely for containing more cells.
-        return self.card_distribution.entropy() + (card_probs * region_entropy).sum(dim=-1)
+        region_dist = torch.distributions.Categorical(logits=self.region_logits)
+        cell_dist = torch.distributions.Categorical(logits=self.cell_logits)
+        conditional = region_dist.entropy() + (
+            region_dist.probs * cell_dist.entropy()
+        ).sum(dim=-1)
+        return self.card_distribution.entropy() + (
+            card_probs * conditional
+        ).sum(dim=-1)
 
     def sample(self):
         cards = self.card_distribution.sample()
         regions = self._region_distribution(cards).sample()
-        cells = self._sample_cells(cards, regions)
+        cells = self._cell_distribution(cards, regions).sample()
         tiles = self._cell_to_tile(regions, cells)
         return torch.stack((cards, tiles * (cards != 0)), dim=1)
 
     def mode(self):
         cards = self.card_distribution.probs.argmax(dim=1)
         regions = self._region_distribution(cards).probs.argmax(dim=1)
-        cells = self._mode_cells(cards, regions)
+        cells = self._cell_distribution(cards, regions).probs.argmax(dim=1)
         tiles = self._cell_to_tile(regions, cells)
         return torch.stack((cards, tiles * (cards != 0)), dim=1)
 
@@ -199,7 +221,7 @@ class CoarseRegionActionDistribution(Distribution):
 class CRPolicy(ActorCriticPolicy):
     def _build(self, lr_schedule):
         self._build_mlp_extractor()
-        self.action_dist = CoarseRegionActionDistribution()
+        self.action_dist = AutoregressiveActionDistribution()
         self.action_net = self.action_dist.proba_distribution_net(self.mlp_extractor.latent_dim_pi)
         self.value_net = nn.Linear(self.mlp_extractor.latent_dim_vf, 1)
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
@@ -270,7 +292,7 @@ def make_env(rank):
 if __name__ == "__main__":
     n_envs = int(os.environ.get("N_ENVS", min(4, os.cpu_count() or 1)))
     vec_env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(n_envs)], start_method="spawn"))
-    checkpoint = os.environ.get("CHECKPOINT", "coarse_region_checkpoint")
+    checkpoint = os.environ.get("CHECKPOINT", "autoregressive_checkpoint")
     kwargs = {"features_extractor_class": CRSetExtractor, "net_arch": {"pi": [], "vf": []}}
     model = PPO(
         CRPolicy, vec_env, policy_kwargs=kwargs, n_steps=256, batch_size=256,
@@ -280,7 +302,7 @@ if __name__ == "__main__":
     )
     try:
         model.learn(total_timesteps=int(os.environ.get("TOTAL_STEPS", "1000000")),
-                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="coarse_region"), EvalCallback()])
+                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="autoregressive"), EvalCallback()])
     finally:
         model.save(checkpoint)
         vec_env.close()
