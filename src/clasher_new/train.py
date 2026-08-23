@@ -250,8 +250,33 @@ class CRPolicy(ActorCriticPolicy):
         return self._distribution(obs)
 
 
+class ActionDiagnosticsCallback(BaseCallback):
+    """Log action validity and reward components needed to debug learning."""
+    def __init__(self, log_every=4096, verbose=0):
+        super().__init__(verbose)
+        self.log_every = log_every
+        self.count = self.no_ops = self.invalid = 0
+        self.red_damage = self.blue_damage = 0.0
+
+    def _on_step(self):
+        for info in self.locals.get("infos", []):
+            self.count += 1
+            self.no_ops += int(info.get("no_op", False))
+            self.invalid += int(not info.get("no_op", False) and not info.get("deployment_succeeded", False))
+            self.red_damage += info.get("red_hp_damage", 0.0)
+            self.blue_damage += info.get("blue_hp_damage", 0.0)
+        if self.count >= self.log_every:
+            self.logger.record("debug/no_op_rate", self.no_ops / self.count)
+            self.logger.record("debug/invalid_deployment_rate", self.invalid / self.count)
+            self.logger.record("debug/red_damage_per_decision", self.red_damage / self.count)
+            self.logger.record("debug/blue_damage_per_decision", self.blue_damage / self.count)
+            self.count = self.no_ops = self.invalid = 0
+            self.red_damage = self.blue_damage = 0.0
+        return True
+
+
 class EvalCallback(BaseCallback):
-    def __init__(self, eval_freq=20_000, episodes=10, verbose=0):
+    def __init__(self, eval_freq=20_000, episodes=50, verbose=0):
         super().__init__(verbose)
         self.eval_freq, self.episodes, self.last = eval_freq, episodes, 0
         self.strategies = [legal_random_strategy, patient_random_strategy,
@@ -302,7 +327,7 @@ if __name__ == "__main__":
     )
     try:
         model.learn(total_timesteps=int(os.environ.get("TOTAL_STEPS", "1000000")),
-                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="autoregressive"), EvalCallback()])
+                    callback=[CheckpointCallback(save_freq=max(10000 // n_envs, 1), save_path="./cr_logs/", name_prefix="autoregressive"), ActionDiagnosticsCallback(), EvalCallback()])
     finally:
         model.save(checkpoint)
         vec_env.close()

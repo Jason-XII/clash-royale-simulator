@@ -202,6 +202,11 @@ class CREnv(gym.Env):
                 reward -= 10
 
         return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
+            "red_hp_damage": red_hps_old-red_hps_new,
+            "blue_hp_damage": blue_hps_old-blue_hps_new,
+            "red_crowns_gained": red_left-red_left_new,
+            "blue_crowns_lost": blue_left-blue_left_new,
+            "reward": reward,
             "deployment_succeeded": deployment_succeeded,
             "no_op": slot == 0,
             "winner": self.battle.winner,
@@ -236,7 +241,10 @@ class CREnv(gym.Env):
             projectile_damage = each.data.projectile_data.damage / 200
 
             x, y = each.position.x/18, each.position.y/32
-            if player_id == 1:
+            # Observations are egocentric for both players. Player 0 uses the
+            # simulator's coordinates; player 1 sees the vertically/horizontally
+            # mirrored arena, including its own entities.
+            if player_id_observe == 1:
                 x = 1-x
                 y = 1-y
             obs_arr = (elixir, speed, is_air, attacks_ground, attacks_air, hp_left, hp_percentage,
