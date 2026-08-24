@@ -8,42 +8,36 @@
 
 在模拟器基础之上，为了方便所有人使用我的模拟器进行AI的研究，我还搭建了一个强化学习环境，可以通过Stable-Baselines3即插即用进行训练，目前使用基于CNN的网络架构，模型能够稳定的学习和进步。
 
-## Game Interface
+## 效果展示
 
 ![demo](./demo2.gif)
 
-## Installation
+上图为模拟器界面与游戏实际效果的对比。我记录了真实游戏里的下牌时间，然后输入到模拟器中进行模拟，在前三十秒的对局中，卡牌交互是完全准确的。
 
-Run the following command in your terminal to clone this repository and install the required python packages.
+## 安装
+
+在终端中运行下面的命令：
 ```bash
 git clone https://github.com/Jason-XII/clash-royale-simulator.git
 cd clash-royale-simulator
-pip install pygame fastcore numpy==1.26.4 stable-baselines3 tensorboard --user --no-cache-dir
+pip install pygame fastcore numpy stable-baselines3 tensorboard --user --no-cache-dir
 ```
 
-## How to play
+## 局域网联机
 
-This simulator is already playable! You need two computers that connect to the same local network. 
+本模拟器支持局域网联机功能，也就是说，你可以和你的朋友在局域网内联机进行对战。我开发这个功能只是为了快速测试卡牌的效果，并不是实现了一个皇室战争服务器。联机步骤如下：
 
-1. Run `ipconfig` on Windows or `ifconfig | grep inet` on macOS. Find your ip address in the local network. 
-If you are at home, the address should look like 192.168.xx.xx, if you are connected to a school network, 
-then that will probably start with a 10.xx.xx.xx.
-
-2. Modify the parameter in `server.py` in `src/clasher_new` and run it. Code files all live in this directory. 
-3. Send the `client_side` folder to another device and run the `client.py`. 
-4. Follow the instructions in the GUI and enter the server ip address after choosing your deck.
-5. When two clients are connected to the same server, the game starts automatically! 
-You can see elixir, drag and drop to deploy cards, see entities on the screen, etc.
+1. 找到本机在局域网的IP地址。在Windows系统上运行`ipconfig`，在MacOS系统上运行`ifconfig | grep inet`即可得到本机的IP地址，通常以192.168开头。
+2. 在`src/clasher_new/server.py`的最后找到存放ip地址的位置，把它替换为你自己的IP地址。然后运行。
+3. 在两台电脑上同时运行`src/clasher_new/client_side/client.py`，选择卡组后，输入刚才的IP地址即可连接。
+4. 两个客户端都连接后，游戏会自动开始。
 
 
-## Supported features
+## 模拟器特性
 
-I have implemented 47 cards in total, no evolutions, hero or champion cards are
-implemented yet. The simulator's behavior is not *completely* consistent with real gameplay
-and I'm continuously trying to improve this. I recently updated the pathfinding algorithm to
-A* search, although somewhat closer to real gameplay, there are still small inconsistencies. 
+目前我实现了47张卡牌，因为时间精力有限，暂时没有实现觉醒、精英和英雄卡的打算。模拟器有着和原游戏一致的寻路算法，大部分角色有和游戏相同的数值。
 
-Complete list of implemented cards:
+下面是我实现的所有卡牌名称：
 
 - Knight
 - Giant
