@@ -85,16 +85,13 @@ class RandomEvalCallback(BaseCallback):
 
 
 if __name__ == '__main__':
+    opponent = PPO.load('cr_5655600_steps.zip')
     env = CREnv(opponent_model=lambda obs: random_strategy(obs))
 
-    model = PPO(
-        "MultiInputPolicy", env,
-        policy_kwargs={"features_extractor_class": CRFeatureExtractor},
-        verbose=1, tensorboard_log="./cr_logs/", device="cuda", seed=0,
-    )
-    cb = CheckpointCallback(save_freq=10_000, save_path="./cr_logs/", name_prefix="cr")
+    model = PPO.load("cr_checkpoint", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_selfplay/")
+    cb = CheckpointCallback(save_freq=10_000, save_path="./cr_selfplay/", name_prefix="cr")
     try:
         model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb])
     finally:
         print('Saving model.')
-        model.save('cr_checkpoint')
+        model.save('cr_selfplay')
