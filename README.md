@@ -32,6 +32,38 @@ pip install pygame fastcore numpy stable-baselines3 tensorboard --user --no-cach
 3. 在两台电脑上同时运行`src/clasher_new/client_side/client.py`，选择卡组后，输入刚才的IP地址即可连接。
 4. 两个客户端都连接后，游戏会自动开始。
 
+## 项目结构
+
+如果你也对训练皇室战争的AI模型非常感兴趣，那么我强烈建议你去认真阅读我这个仓库的代码。模拟器的代码总量应该两千行左右，而模型训练的代码则有约500行代码（我没统计过，纯个人感觉）。比如说，你想知道寻路机制是怎么实现的？我的模拟器是怎么处理索敌的？我的AI模型架构是什么，RL环境的观测空间和动作空间是什么？
+
+我这个项目绝大部分的代码都是自己一行一行敲出来的，如果你想针对某个bug提出修改方案，或者增加模拟器的功能，提出的PR中不能有明显的AI痕迹。 
+
+模拟器的实现：
+
+```plaintext
+短而且逻辑简单，定义一些常用的类供模拟器使用
+arena.py
+core.py
+player.py
+card_utils.py
+
+核心的战斗引擎、寻路机制和卡牌逻辑实现
+battle.py
+card_mechanics.py
+new_visualization.py
+pathfinding.py
+pathfinding_heap.py
+
+联机对战
+server.py
+client_side/client.py
+```
+
+RL环境和训练代码：
+```plaintext
+environment.py
+train.py
+```
 
 ## 模拟器特性
 
@@ -87,61 +119,10 @@ pip install pygame fastcore numpy stable-baselines3 tensorboard --user --no-cach
 - Fireball
 - Arrows
 
-## Read the code
+## 帮个忙吧
 
-If you are interested in this project, you can consider reading my code and figure out
-how the simulator work for yourself. I tried my best to write clear code. Here's a brief
-explanation of each python file in the repo, listed in suggested reading order:
+不知不觉从项目开始开发到现在，已经过去半年了，我已经数不清有多少时间花在上面了。然而，这个项目的上限基本取决于模拟器的上限，我一人无力准确实现皇室122张卡牌的所有逻辑，如果你愿意帮我实现一两张牌，我将会非常高兴。
 
-The real code files are in `src/clasher_new`. 
-- `__init__.py` is an empty placeholder
-- `gamedata.json` contains very necessary data extracted from the game, like hitpoints, damage, etc.
-- `cards_stats_xxx.json` files are also game data files downloaded from *royaleapi.com*.
-- `card_utils.py` reads `gamedata.json` and provides easy ways to access character attributes
-- `arena.py` defines `TileGrid` which contains information on where each sides' King tower and princess towers are located
-- `player.py` is a short file that stores a player's information in game, like current elixir.
-- `battle.py` contains all the game logic, defining behavior for troops, buildings, projectiles and other mechanics.
-- `core.py` and `card_mechanics.py` provides an interface for special card logic. Makes the system more flexible.
-- `server.py` and `client.py` gives a simple pygame interface that allows two players to connect through local network and play in realtime.
+我的B站用户名是`jasonmoonw`，如果你想联系我，给我发私信就好了。我的discord用户名是jasoncoder_47308。
 
-## To-do list
-
-I trained the model for 8M steps and the win rate stops improving at around 70-80%. This is probably
-caused by the model trying to independently predict the card, position x and position y.
-Humans make decisions by choosing all three simultaneously, we first determine (vaguely)
-what we should do, and then do the actual placement. So I think the model can perform better
-if I let it produce the x and y position at once, or we use a different structure entirely
-by using the selection attention framework introduced in another paper. I might have to 
-learn more about that paper. 
-
-Against a random agent, the PPO model should train relatively well and be consistently winning
-after 1-2M steps. So something's probably wrong with the model architecture.
-
-I also thought of a way to determine the level of game playing agents: tier testing.
-Imagine we have a pool of agents and we let them fight for enough rounds. Good enough agents will 
-consistently win and those with winrates over 70% can make it to the next tier. The logic 
-might be a little flawed here but points to the right direction.
-
-(might introduce elo score?)
-
-Lots of new benchmarks can be added besides the winrate against a random agent. For example,
-we can test the agent's use of spells by placing swarm units at the bridge. By placing a
-mini pekka behind a giant we test the agent's ability of defending. 
-
-The environment can also be refined. The agent needs to know the phase of the game that 
-it's currently in, because decks have different strategies in single, double and triple elixir.
-When it's near the end of the game and overtime, the agent may need to cycle spells to win.
-
-The biggest flaw in the simulator is that the king tower activation seems a bit off. 
-The king tower seems to have a shorter range than the musketeer, which is very strange.
-But this can be easily fixed.
-
-
-## I need help
-
-This project is far from finishing. I already poured more than 100 hours into this project and many more 
-still lies ahead. If you want to contribute, please submit issues or pull requests. 
-
-You are more than welcome to contact me via my email: `2243272839@qq.com` 
-
-Or you can add my discord: jasoncoder_47308
+给我的项目点个star吧！

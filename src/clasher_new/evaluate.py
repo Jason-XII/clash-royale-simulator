@@ -6,6 +6,8 @@ from stable_baselines3 import PPO
 
 from tqdm import tqdm
 
+import sys
+
 import torch
 
 class SequentialEvalEnv(CREnv):
@@ -38,8 +40,8 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-steps = ('checkpoint',)
-games_count = 200
+steps = ('5655600_steps',)
+games_count = 1
 for step in steps:
     model = PPO.load(f"cr_logs/cr_{step}.zip")
     env = CREnv(opponent_model=random_strategy)
