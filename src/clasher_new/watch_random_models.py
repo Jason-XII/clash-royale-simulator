@@ -1,27 +1,17 @@
 from environment import CREnv, random_strategy
-from train import CRAutoregressivePolicy, CRTransformerExtractor
 from stable_baselines3 import PPO
 
-policy_kwargs = {
-    "features_extractor_class": CRTransformerExtractor,
-    "net_arch": {"pi": [], "vf": []},
-}
+model = PPO.load("cr_logs/cr_5655600_steps.zip")
 
-setup_env = CREnv(opponent_model=random_strategy)
-blue_model = PPO(CRAutoregressivePolicy, setup_env, policy_kwargs=policy_kwargs)
-red_model = PPO(CRAutoregressivePolicy, setup_env, policy_kwargs=policy_kwargs)
+env = CREnv(opponent_model=lambda observation: model.predict(observation)[0])
 
-env = CREnv(
-    opponent_model=lambda obs: red_model.predict(obs, deterministic=False)[0],
-    visualize=True,
-)
+for i in range(50):
+    obs, _ = env.reset()
+    done = False
 
-obs, _ = env.reset()
-done = False
+    while not done:
+        action, _ = model.predict(obs)
+        obs, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
 
-while not done:
-    action, _ = blue_model.predict(obs, deterministic=False)
-    obs, reward, terminated, truncated, info = env.step(action)
-    done = terminated or truncated
-
-print(f"Winner: player {env.battle.winner}")
+    print(f"Winner: player {env.battle.winner}")
