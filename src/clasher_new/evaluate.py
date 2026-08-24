@@ -38,11 +38,11 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-steps = ('4114416_steps',)
-games_count = 1
+steps = ('checkpoint',)
+games_count = 200
 for step in steps:
     model = PPO.load(f"cr_logs/cr_{step}.zip")
-    env = CREnv(opponent_model=random_strategy, visualize=True)
+    env = CREnv(opponent_model=random_strategy)
     print('Evaluating model at', step, 'steps:')
     reward_total = 0
     games_won = 0

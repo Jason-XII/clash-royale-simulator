@@ -182,14 +182,14 @@ class CRAutoregressivePolicy(MultiInputActorCriticPolicy):
 
 if __name__ == "__main__":
     env = CREnv(opponent_model=random_strategy)
-    model = PPO(
-        CRAutoregressivePolicy,
-        env,
-        policy_kwargs={"features_extractor_class": CRFeatureExtractor},
-        verbose=1,
-        tensorboard_log="./cr_logs_autoregressive/",
+    model = PPO.load(
+        "cr_autoregressive",
+        env=env,
         device="cuda",
         seed=0,
+        learning_rate=1e-4,
+        n_epochs=4,
+        target_kl=0.03
     )
     callback = CheckpointCallback(
         save_freq=10_000,
