@@ -1,5 +1,7 @@
 # Clash Royale Simulator 
 
+[English Version](./readme_en.md)
+
 项目完整介绍视频：https://www.bilibili.com/video/BV1n3uZ6WE5P/
 
 众所周知，想让一个AI学会怎样玩好一款游戏，必须让它收集大量的经验。对皇室战争这款游戏来说，经验收集是人机开发和训练的一个巨大瓶颈，哪怕是掌握内部战斗引擎接口的supercell员工，也没有办法加速引擎来更快的收集经验（Learning to Play Imperfect-Information Games by Imitating an Oracle Planner, arXiv:2012.12186）。
