@@ -2,26 +2,15 @@
 
 项目完整介绍视频：https://www.bilibili.com/video/BV1n3uZ6WE5P/
 
-This project simulates a Clash-Royale like environment and provides a reinforcement learning interface for agent training.
+众所周知，想让一个AI学会怎样玩好一款游戏，必须让它收集大量的经验。对皇室战争这款游戏来说，经验收集是人机开发和训练的一个巨大瓶颈，哪怕是掌握内部战斗引擎接口的supercell员工，也没有办法加速引擎来更快的收集经验（Learning to Play Imperfect-Information Games by Imitating an Oracle Planner, arXiv:2012.12186）。
 
-Why I created this repository: I like clash royale and want to train a RL agent to play the game. 
-However, a simulator is needed to speed up training. I searched on GitHub and the only usable project I found
-was samdickson22's [repository](https://github.com/samdickson22/clash-simulator). I noticed that the code is almost completely written by AI, which is hard to read and impossible for humans to make improvements on the code.
+而我的仓库则依赖于自建的完整模拟器逻辑，来弥补目前所有AI训练的经验收集瓶颈。这个模拟器读取准确的游戏数值，复现了原始游戏引擎的A*搜索寻路逻辑，卡牌交互基本准确。这数千行代码全由我一人编写，无AI Agent辅助。经过不断的优化，目前的模拟器性能可以做到1.1秒左右跑完180秒的对局，在我的M4芯片上实现大概150倍的加速。在一个一般般的CPU上，大概也能做到70~90倍相对于真实时间的加速。
 
-In the end, I realized that the only way to make all of this work is to re-implement the whole game from scratch, without any vibe-coding.
-
-Now, I present this functioning simulator that implemented 47 cards including troops,
-buildings and spells (complete list below) and can reach the simulation speed of 83 microseconds per tick.
-This means that the simulator can play more than 1000 games (with itself) within an hour.
-
-I also designed a RL training environment compatible with gymnasium and stable-baselines3, supporting out-of-the-box training.
-I used a PPO algorithm to train a basic model for 3M timesteps and can reach a winrate of 83% against a non-trained version of the agent.
-
-To quickly know more information about my project, see [my paper](ClashSimPaper.pdf).
+在模拟器基础之上，为了方便所有人使用我的模拟器进行AI的研究，我还搭建了一个强化学习环境，可以通过Stable-Baselines3即插即用进行训练，目前使用基于CNN的网络架构，模型能够稳定的学习和进步。
 
 ## Game Interface
 
-![demo](./demo.gif)
+![demo](./demo2.gif)
 
 ## Installation
 
