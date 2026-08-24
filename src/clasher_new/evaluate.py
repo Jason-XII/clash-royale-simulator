@@ -4,6 +4,8 @@ from new_visualization import Visualizer
 from environment import CREnv, random_strategy, player_0_deck, shuffle, Position
 from stable_baselines3 import PPO
 
+from tqdm import tqdm
+
 import torch
 
 class SequentialEvalEnv(CREnv):
@@ -36,24 +38,24 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-
-model = PPO.load("cr_logs/cr_202993_steps.zip")
-env = CREnv(opponent_model=random_strategy, visualize=True)
-
-
-lost_hp = 0
-for i in range(1):
-    obs, _ = env.reset()
-    done = False
-    total_reward = 0
-    while not done:
-        action, _ = model.predict(obs,deterministic=False)
-        print(action, obs['hand_mask'])
-        obs, reward, termination, truncation, info = env.step(action)
-        obs_tensor, _ = model.policy.obs_to_tensor(obs)
-        with torch.no_grad():
-            value = model.policy.predict_values(obs_tensor)
-        done = termination or truncation
-        total_reward += reward
-
-    p0 = env.battle.players[0]
+steps = ('1803232',)
+for step in steps:
+    model = PPO.load(f"cr_logs/cr_{step}_steps.zip")
+    env = CREnv(opponent_model=random_strategy)
+    print('Evaluating model at', step, 'steps:')
+    reward_total = 0
+    games_won = 0
+    for i in tqdm(range(200)):
+        obs, _ = env.reset()
+        done = False
+        while not done:
+            action, _ = model.predict(obs,deterministic=True)
+            obs, reward, termination, truncation, info = env.step(action)
+            obs_tensor, _ = model.policy.obs_to_tensor(obs)
+            with torch.no_grad():
+                value = model.policy.predict_values(obs_tensor)
+            done = termination or truncation
+            reward_total += reward
+        games_won += (1-env.battle.winner)
+    print("Win rate:", games_won/200, end=' ')
+    print("Mean reward:", reward_total/200)
