@@ -136,11 +136,10 @@ class CREnv(gym.Env):
             damage = each.data.damage / 200
             projectile_damage = each.data.projectile_data.damage / 200
 
-            x, y = each.position.x, each.position.y
+            x, y = int(each.position.x), int(each.position.y)
             if player_id_observe == 1:
-                x = 18-x
-                y = 32-y
-            x, y = int(x), int(y)
+                x = 17-x
+                y = 31-y
             obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
             obs[y][x] = obs_arr.copy()
