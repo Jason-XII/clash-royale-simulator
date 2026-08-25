@@ -128,7 +128,7 @@ class CREnv(gym.Env):
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
 
             speed = each.data.speed
-            hp_left = np.log(each.hp) / 10
+            hp_left = np.log(each.hp) / 10 if each.hp != 0 else 0
             hp_percentage = each.hp / each.data.hp if each.data.hp != 0 else 0
             hit_speed = each.data.hit_speed
             attack_range = each.data.range / 3
