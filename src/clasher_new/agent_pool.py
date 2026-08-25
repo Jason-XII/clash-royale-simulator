@@ -2,8 +2,8 @@ from environment import CREnv, random_strategy
 from stable_baselines3 import PPO
 import random
 
-steps = ('5655600', '200000', '600000', '1000000', '1501472', '1803232', '4114416')
-elo = [1500, 1364.2788279391582, 1483.4884190224063, 1500, 1500, 1516.5115809775937, 1635.7211720608418]
+steps = ('1000000', '2000000', '3000000', '3500000', '4000000', '4500000', '5000000')
+elo = [1500, 1500, 1500, 1500, 1500, 1500, 1500]
 models = [PPO.load(f"cr_logs/cr_{each}_steps.zip") for each in steps]
 
 def expected(r_a, r_b):
