@@ -119,10 +119,10 @@ class CREnv(gym.Env):
         obs = np.zeros((32, 18, 15), dtype=np.float32)
         for id, each in self.battle.entities.items():
             if not each.is_alive: continue
-            if isinstance(each, battle.Projectile): continue
+            if each.name not in entity_names: continue
             entity_id = entity_names.index(each.name)
             card_type = card_types.index(each.data.type)
-            player_id = each.player
+            player_id = each.player != player_id_observe # This way, own troops are always labeled as 1
             elixir = each.data.elixir
             is_air = int(each.data.is_air_unit)
             attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
@@ -137,7 +137,7 @@ class CREnv(gym.Env):
             projectile_damage = each.data.projectile_data.damage / 200
 
             x, y = int(each.position.x), int(each.position.y)
-            if player_id == 1:
+            if player_id != player_id_observe:
                 x = 17-x
                 y = 31-y
             obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
