@@ -22,7 +22,7 @@
 ```bash
 git clone https://github.com/Jason-XII/clash-royale-simulator.git
 cd clash-royale-simulator
-pip install pygame fastcore numpy stable-baselines3 tensorboard --user --no-cache-dir
+pip install pygame fastcore numpy stable-baselines3 tensorboard frida --user --no-cache-dir
 ```
 
 ## 局域网联机
