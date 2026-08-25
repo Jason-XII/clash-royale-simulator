@@ -4,9 +4,15 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+
+import random
+import numpy as np
+
+import os
 
 class CRFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
@@ -83,15 +89,43 @@ class RandomEvalCallback(BaseCallback):
             self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
         return True
 
+def make_env(rank):
+    def factory():
+        random.seed(10_000 + rank)
+        np.random.seed(10_000 + rank)
+        torch.set_num_threads(1)
+        return CREnv(opponent_model=random_strategy)
+    return factory
+
 
 if __name__ == '__main__':
-    opponent = PPO.load('cr_5655600_steps.zip')
-    env = CREnv(opponent_model=lambda obs: random_strategy(obs))
+    n_envs = 8
+    env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
+    env = VecMonitor(env)
+    n_steps = 2048 // n_envs
 
-    model = PPO.load("cr_checkpoint", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_selfplay/")
-    cb = CheckpointCallback(save_freq=10_000, save_path="./cr_selfplay/", name_prefix="cr")
+    if not os.path.exists('cr_checkpoint.zip'):
+        print('Previous checkpoint does not exisiting, training new one from scratch.')
+        model = PPO(
+            "MultiInputPolicy",
+            env,
+            policy_kwargs={"features_extractor_class": CRFeatureExtractor},
+            n_steps=n_steps,
+            # 256 per environment
+            batch_size=256,
+            learning_rate=1e-4,
+            n_epochs=4,
+            target_kl=0.03,
+            device="cuda",
+            seed=0,
+            verbose=1,
+            tensorboard_log="./cr_random/",
+        )
+    else:
+        model = PPO.load("cr_checkpoint", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_random/")
+    cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path="./cr_random/", name_prefix="cr")
     try:
-        model.learn(total_timesteps=1_000_000, reset_num_timesteps=False, callback=[cb])
+        model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=[cb])
     finally:
         print('Saving model.')
-        model.save('cr_selfplay')
+        model.save('cr_checkpoint')
