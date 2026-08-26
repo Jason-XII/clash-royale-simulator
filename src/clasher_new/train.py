@@ -105,7 +105,7 @@ if __name__ == '__main__':
     n_envs = 16
     env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
     env = VecMonitor(env)
-    n_steps = 2048 // n_envs
+    n_steps = 8192 // n_envs
 
     if not os.path.exists('cr_checkpoint.zip'):
         print('Previous checkpoint does not exisiting, training new one from scratch.')

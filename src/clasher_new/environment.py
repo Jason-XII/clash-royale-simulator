@@ -85,7 +85,7 @@ class CREnv(gym.Env):
         slot, y, x = action
         if slot != 0:
             card_name = p0.cycle[slot-1]
-            self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
+            succeed = self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
 
         self.opponent_action()
         # only make decisions per half second
@@ -110,7 +110,8 @@ class CREnv(gym.Env):
                 reward += 10
             else:
                 reward -= 10
-
+        if slot != 0 and not succeed:
+            reward -= 0.05
         return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
 
 

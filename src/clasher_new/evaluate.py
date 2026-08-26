@@ -40,11 +40,11 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-steps = ('10625312_steps',)
-games_count = 100
+steps = ('15092976_steps',)
+games_count = 1
 for step in steps:
-    model = PPO.load(f"cr_logs/cr_{step}.zip")
-    env = CREnv(opponent_model=random_strategy)
+    model = PPO.load(f"cr_logs/cr_{step}.zip", seed=None)
+    env = CREnv(opponent_model=random_strategy, visualize=True, speed=2)
     print('Evaluating model at', step, 'steps:')
     reward_total = 0
     games_won = 0
@@ -52,11 +52,9 @@ for step in steps:
         obs, _ = env.reset()
         done = False
         while not done:
-            action, _ = model.predict(obs,deterministic=True)
+            action, _ = model.predict(obs)
             obs, reward, termination, truncation, info = env.step(action)
-            obs_tensor, _ = model.policy.obs_to_tensor(obs)
-            with torch.no_grad():
-                value = model.policy.predict_values(obs_tensor)
+            tqdm.write(str(reward))
             done = termination or truncation
             reward_total += reward
         games_won += (1-env.battle.winner)
