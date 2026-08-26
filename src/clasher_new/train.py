@@ -97,7 +97,8 @@ def make_env(rank):
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
         m = random.choice(models)
-        return CREnv(opponent_model=lambda o: m.predict(o)[0])
+        # return CREnv(opponent_model=lambda o: m.predict(o)[0])
+        return CREnv(opponent_model=random_strategy)
     return factory
 
 
@@ -107,7 +108,7 @@ if __name__ == '__main__':
     env = VecMonitor(env)
     n_steps = 8192 // n_envs
 
-    if not os.path.exists('cr_checkpoint.zip'):
+    if not os.path.exists('cr_random_new.zip'):
         print('Previous checkpoint does not exisiting, training new one from scratch.')
         model = PPO(
             "MultiInputPolicy",
@@ -122,13 +123,13 @@ if __name__ == '__main__':
             device="cuda",
             seed=0,
             verbose=1,
-            tensorboard_log="./cr_selfplay/",
+            tensorboard_log="./cr_randomnew/",
         )
     else:
-        model = PPO.load("cr_checkpoint", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_selfplay/")
-    cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path="./cr_selfplay/", name_prefix="cr")
+        model = PPO.load("cr_random_new", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_randomnew/")
+    cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path="./cr_randomnew/", name_prefix="cr")
     try:
         model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=[cb])
     finally:
         print('Saving model.')
-        model.save('cr_selfplay')
+        model.save('cr_random_new')
