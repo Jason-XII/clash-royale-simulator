@@ -89,7 +89,7 @@ class RandomEvalCallback(BaseCallback):
             self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
         return True
 
-models = [PPO.load(f'cr_random/cr_{step}_steps') for step in ('3000000', '3500000', '4000000', '4500000', '5000000')]
+models = [PPO.load(f'cr_selfplay/cr_{step}_steps') for step in ('3000000', '4000000', '5000000', '6485312', '7005312', '8005312', '9005312', '10625312')]
 
 def make_env(rank):
     def factory():
@@ -102,7 +102,7 @@ def make_env(rank):
 
 
 if __name__ == '__main__':
-    n_envs = 8
+    n_envs = 16
     env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
     env = VecMonitor(env)
     n_steps = 2048 // n_envs

@@ -19,7 +19,7 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-model = PPO.load('cr_checkpoint')
+model = PPO.load('cr_logs/cr_10625312_steps.zip')
 
 xlow = 16
 xhigh = 1053
@@ -91,10 +91,12 @@ class Visualizer:
 
     def draw_entities(self):
         obs = np.zeros((32, 18, 15), dtype=np.float32)
+        non_tower_count = 0
         for entity in list(self.snapshot['entities']):
             if entity['card_id_ac'] == -1 and entity['kind_30'] in (12, 13):
                 name = "KingTower" if entity['kind_30'] else 'King_PrincessTowers'
             else:
+                non_tower_count += 1
                 if entity['card_id_ac'] in cards:
                     name = cards[entity['card_id_ac']]
                 elif entity['card_id_ac'] == -1: continue
@@ -132,7 +134,7 @@ class Visualizer:
             sight_range = card.sight_range / 3
             damage = card.damage / 200
             projectile_damage = card.projectile_data.damage / 200
-            x1, y1 = int(x), int(31-y)
+            x1, y1 = max(int(x), 17), int(31-y)
             obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage,
                                 projectile_damage])
@@ -163,10 +165,13 @@ class Visualizer:
             'hand': hand,
             'elixir': np.array([self.snapshot['own_elixir_1e0']], dtype=np.float32)
         }
-        if time.time() - self.start_time > 1.5:
+        if time.time() - self.start_time > 1.5 and non_tower_count > 0:
             self.start_time = time.time()
             slot, y, x = model.predict(final_observation)[0]
             if slot != 0:
+                card_name = entity_names[hand[slot]]
+                elixir = Card(card_name).elixir
+                if elixir > self.snapshot['own_elixir_1e0']: return
                 swipe(slot, y, x)
 
     def draw_ui(self):
