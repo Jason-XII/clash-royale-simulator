@@ -97,8 +97,9 @@ def make_env(rank):
         torch.set_num_threads(1)
         model_names = os.listdir('opponent_pool')
         models = [PPO.load(f'opponent_pool/{name}') for name in model_names]
+        model_funcs = [lambda o: m.predict(o)[0] for m in models]
         # return CREnv(opponent_model=lambda o: m.predict(o)[0])
-        return CREnv(opponent_pool=models)
+        return CREnv(opponent_pool=model_funcs)
     return factory
 
 
