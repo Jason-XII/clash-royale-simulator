@@ -40,7 +40,7 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-steps = ('15010624n_steps',)
+steps = ('20461248n_steps',)
 games_count = 50
 for step in steps:
     model = PPO.load(f"cr_logs/cr_{step}.zip", seed=None)

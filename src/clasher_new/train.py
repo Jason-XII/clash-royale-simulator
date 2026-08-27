@@ -127,7 +127,7 @@ if __name__ == '__main__':
             tensorboard_log="./cr_randomnew/",
         )
     else:
-        model = PPO.load("cr_random_new", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log="./cr_randomnew/")
+        model = PPO.load("cr_random_new", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,ent_coef = 0.001,tensorboard_log="./cr_randomnew/")
     cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path="./cr_randomnew/", name_prefix="cr")
     try:
         model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=[cb])

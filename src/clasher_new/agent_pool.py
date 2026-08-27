@@ -4,7 +4,7 @@ import random
 from itertools import permutations
 from tqdm import tqdm
 
-steps = ('15010624n', '5000000', '9005312', '12432976', '15092976', )
+steps = ('15010624n', '20461248n', '9005312', '12432976', '15092976', )
 elo = [1500]*len(steps)
 matchups = permutations(list(range(len(steps))), 2)
 models = [PPO.load(f"cr_logs/cr_{each}_steps.zip", seed=None) for each in steps]
