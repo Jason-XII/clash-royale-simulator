@@ -89,16 +89,16 @@ class RandomEvalCallback(BaseCallback):
             self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
         return True
 
-models = [PPO.load(f'cr_selfplay/cr_{step}_steps') for step in ('3000000', '4000000', '5000000', '6485312', '7005312', '8005312', '9005312', '10625312')]
 
 def make_env(rank):
     def factory():
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        m = random.choice(models)
+        model_names = os.listdir('opponent_pool')
+        models = [PPO.load(f'opponent_pool/{name}') for name in model_names]
         # return CREnv(opponent_model=lambda o: m.predict(o)[0])
-        return CREnv(opponent_model=random_strategy)
+        return CREnv(opponent_pool=models)
     return factory
 
 

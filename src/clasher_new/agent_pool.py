@@ -4,7 +4,7 @@ import random
 from itertools import permutations
 from tqdm import tqdm
 
-steps = ('1000000', '3000000', '5000000', '7005312', '9005312', '10625312', '12432976', '15092976')
+steps = ('15010624n', '5000000', '9005312', '12432976', '15092976', )
 elo = [1500]*len(steps)
 matchups = permutations(list(range(len(steps))), 2)
 models = [PPO.load(f"cr_logs/cr_{each}_steps.zip", seed=None) for each in steps]
@@ -21,7 +21,7 @@ for index0, index1 in matchups:
     model2 = models[index1]
     env = CREnv(opponent_model=lambda observation: model2.predict(observation)[0])
     wins = 0
-    for i in tqdm(range(10)):
+    for i in tqdm(range(30)):
         obs, _ = env.reset()
         done = False
         while not done:

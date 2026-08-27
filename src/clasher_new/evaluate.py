@@ -40,11 +40,11 @@ class SequentialEvalEnv(CREnv):
 #                                 ('MiniPekka', 3, 12, 0.5)],
 #                         visualize=True, speed=1)
 
-steps = ('15092976_steps',)
-games_count = 1
+steps = ('15010624n_steps',)
+games_count = 50
 for step in steps:
     model = PPO.load(f"cr_logs/cr_{step}.zip", seed=None)
-    env = CREnv(opponent_model=random_strategy, visualize=True, speed=2)
+    env = CREnv(opponent_model=random_strategy, visualize=False)
     print('Evaluating model at', step, 'steps:')
     reward_total = 0
     games_won = 0
@@ -53,10 +53,12 @@ for step in steps:
         done = False
         while not done:
             action, _ = model.predict(obs)
+            # print(action)
             obs, reward, termination, truncation, info = env.step(action)
-            tqdm.write(str(reward))
+            # tqdm.write(str(reward))
             done = termination or truncation
             reward_total += reward
+            # print(env.battle.players[0].elixir)
         games_won += (1-env.battle.winner)
     print("Win rate:", games_won/games_count, end=' ')
     print("Mean reward:", reward_total/games_count)

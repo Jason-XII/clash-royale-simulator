@@ -6,6 +6,7 @@ import gymnasium as gym
 from random import shuffle, randint
 import time
 import numpy as np
+import random
 
 from stable_baselines3.common.env_checker import check_env
 
@@ -30,9 +31,10 @@ speed_types = [0, 0.75, 1.0, 1.5]
 
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, visualize=False, speed=1.0):
+    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0):
         super().__init__()
         self.opponent = opponent_model
+        self.opponent_pool = opponent_pool
         self.battle: battle.BattleState = None
         self.speed = speed
         self.observation_space = gym.spaces.Dict({
@@ -49,6 +51,8 @@ class CREnv(gym.Env):
         super().reset(seed=seed, options=options)
         shuffle(player_0_deck)
         shuffle(player_1_deck)
+        if self.opponent_pool:
+            self.opponent = random.choice(self.opponent_pool)
         self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
                        player.PlayerState(1, player_1_deck[:], 5.0))
         if self.visualize:

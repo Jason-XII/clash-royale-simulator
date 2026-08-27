@@ -19,7 +19,7 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-model = PPO.load('cr_logs/cr_10625312_steps.zip')
+model = PPO.load('cr_logs/cr_12432976_steps.zip')
 
 xlow = 16
 xhigh = 1053
