@@ -246,6 +246,7 @@ class Troop(Entity):
         self.jumping_across_river = False
         self.start_jumping_position = None
         self.spawned = False
+        self.path_index = 0
 
     def to_dict(self):
         d = super().to_dict()
@@ -300,22 +301,32 @@ class Troop(Entity):
             else:
                 if not self.path:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+                    self.path_index = 1 if len(self.path) > 1 else 0
                 elif self.in_sight_range(current_target) and self.battle_state.tick % 10 == 0:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
+                    self.path_index = 1 if len(self.path) > 1 else 0
 
                 # determine the next waypoint and move towards that waypoint
                 min_point = min(self.path, key=lambda pos: pos.distance_to(self.position))
                 index = self.path.index(min_point)
                 start_vector = (self.position.x-self.path[0].x, self.position.y-self.path[0].y)
                 close_vector = (self.position.x-min_point.x, self.position.y-min_point.y)
+                distance_to_waypoint = self.position.distance_to(min_point)
                 dot = start_vector[0]*close_vector[0] + start_vector[1]*close_vector[1]
-                if dot >= 0:
-                    # move towards next waypoint
-                    index += 1
-                if index == len(self.path):
+                if self.path_index < len(self.path):
+                    waypoint = self.path[self.path_index]
+
+                    if self.position.distance_to(waypoint) <= 0.3:
+                        self.path_index += 1
+
+                if self.path_index >= len(self.path):
                     self.move_towards(current_target.position, dt, True)
                 else:
-                    self.move_towards(self.path[index], dt, True)
+                    self.move_towards(
+                        self.path[self.path_index],
+                        dt,
+                        True,
+                    )
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:
@@ -752,5 +763,3 @@ class BattleState:
             elif attack_ground and not entity.data.is_air_unit:
                 if entity.position.distance_to(position) < range:
                     entity.take_damage(amount_dealt)
-
-
