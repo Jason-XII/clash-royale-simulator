@@ -145,7 +145,7 @@ class CREnv(gym.Env):
             if player_id_observe == 1:
                 x = 17-x
                 y = 31-y
-            obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
+            obs_arr = np.array([entity_id, card_type, player_id, elixir, speed, is_air, attacks_ground, attacks_air,
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
             obs[y][x] = obs_arr.copy()
 
