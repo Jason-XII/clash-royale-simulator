@@ -40,7 +40,9 @@ class CREnv(gym.Env):
         self.observation_space = gym.spaces.Dict({
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
-            "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32)
+            "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
+            "phase": gym.spaces.Discrete(4),
+            "time_till_next_phase": gym.spaces.Box(low=0.0, high=120.0, shape=(1,), dtype=np.float32)
         })
         self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
@@ -149,11 +151,26 @@ class CREnv(gym.Env):
 
         hand = np.array([entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]],
                         dtype=np.int32)
+        battle_time = self.battle.time
+        if battle_time < 120:
+            phase = 1
+            time_left = 120-battle_time
+        elif battle_time < 180:
+             phase = 2
+             time_left = 180 - battle_time
+        elif battle_time < 240:
+            phase = 3
+            time_left = 240 - battle_time
+        else:
+            phase = 4
+            time_left = 300 - battle_time
 
         return {
             'grid': obs,
             'hand': hand,
-            'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32)
+            'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
+            'phase': phase-1,
+            'time_till_next_phase': time_left
         }
 
 
