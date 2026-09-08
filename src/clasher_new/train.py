@@ -29,7 +29,7 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         with torch.no_grad():
             dummy = torch.zeros(1, self.in_channels, 32, 18)
             cnn_out = self.cnn(dummy).shape[1]
-        self.fc = nn.Linear(cnn_out + 5 * self.embedding_dim + 1, features_dim)
+        self.fc = nn.Linear(cnn_out + 5 * self.embedding_dim + 1 + 4 + 1, features_dim)
 
     def forward(self, observation):
         """
@@ -54,7 +54,10 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         grid_feat = self.cnn(x)
 
         hand_feat = self.entity_embedding(hand).flatten(1)  # (B, 5*EMBED)
-        combined = torch.cat([grid_feat, hand_feat, elixir.float()], dim=1)
+        phase = observation["phase"].long()
+        phase = F.one_hot(phase, num_classes=4).float()
+        time_left = observation["time_till_next_phase"].float()
+        combined = torch.cat([grid_feat, hand_feat, elixir.float(), phase, time_left], dim=1)
         return torch.relu(self.fc(combined))
 
 
@@ -95,11 +98,11 @@ def make_env(rank):
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        model_names = os.listdir('opponent_pool')
-        models = [PPO.load(f'opponent_pool/{name}') for name in model_names]
-        model_funcs = [lambda o: m.predict(o)[0] for m in models]
+        # model_names = os.listdir('opponent_pool')
+        # models = [PPO.load(f'opponent_pool/{name}') for name in model_names]
+        # model_funcs = [lambda o: m.predict(o)[0] for m in models]
         # return CREnv(opponent_model=lambda o: m.predict(o)[0])
-        return CREnv(opponent_pool=model_funcs)
+        return CREnv(opponent_model=random_strategy)
     return factory
 
 
@@ -109,7 +112,9 @@ if __name__ == '__main__':
     env = VecMonitor(env)
     n_steps = 8192 // n_envs
 
-    if not os.path.exists('cr_random_new.zip'):
+    model_name = "cr_enhanced"
+
+    if not os.path.exists(f'{model_name}.zip'):
         print('Previous checkpoint does not exisiting, training new one from scratch.')
         model = PPO(
             "MultiInputPolicy",
@@ -124,13 +129,13 @@ if __name__ == '__main__':
             device="cuda",
             seed=0,
             verbose=1,
-            tensorboard_log="./cr_randomnew/",
+            tensorboard_log=f"./{model_name}_dir/",
         )
     else:
-        model = PPO.load("cr_random_new", env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,ent_coef = 0.001,tensorboard_log="./cr_randomnew/")
-    cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path="./cr_randomnew/", name_prefix="cr")
+        model = PPO.load(model_name, env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,ent_coef = 0.001,tensorboard_log=f"./{model_name}_dir/")
+    cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path=f"./{model_name}_dir/", name_prefix="cr")
     try:
         model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=[cb])
     finally:
         print('Saving model.')
-        model.save('cr_random_new')
+        model.save(model_name)

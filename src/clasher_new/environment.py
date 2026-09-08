@@ -42,7 +42,7 @@ class CREnv(gym.Env):
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "phase": gym.spaces.Discrete(4),
-            "time_till_next_phase": gym.spaces.Box(low=0.0, high=120.0, shape=(1,), dtype=np.float32)
+            "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
         })
         self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
@@ -170,7 +170,7 @@ class CREnv(gym.Env):
             'hand': hand,
             'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
             'phase': phase-1,
-            'time_till_next_phase': time_left
+            'time_till_next_phase': np.array([time_left/120.0], dtype=np.float32)
         }
 
 
