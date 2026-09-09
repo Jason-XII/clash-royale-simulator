@@ -54,43 +54,10 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         grid_feat = self.cnn(x)
 
         hand_feat = self.entity_embedding(hand).flatten(1)  # (B, 5*EMBED)
-        phase = observation["phase"].long()
-        phase = F.one_hot(phase, num_classes=4).float()
+        phase = observation["phase"].float().flatten(1)  # (B, 1)
         time_left = observation["time_till_next_phase"].float()
         combined = torch.cat([grid_feat, hand_feat, elixir.float(), phase, time_left], dim=1)
         return torch.relu(self.fc(combined))
-
-
-class WeightsCopyingCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-
-    def _on_step(self):
-        if self.num_timesteps % 50000 == 0:
-            opponent.policy.load_state_dict(self.model.policy.state_dict())
-        return True
-
-class RandomEvalCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-
-    def _on_step(self) -> bool:
-        if self.num_timesteps % 50000 == 0:
-            rewards = []
-            eval_env = CREnv(opponent_model=lambda obs: random_strategy(obs))
-            for i in range(5):
-                obs, _ = eval_env.reset()
-                done = False
-                total_reward = 0
-                while not done:
-                    action, _ = self.model.predict(obs)
-                    obs, reward, termination, truncation, info = eval_env.step(action)
-                    done = termination or truncation
-                    total_reward += reward
-
-                rewards.append(total_reward)
-            self.logger.record("eval/mean_reward_vs_random", sum(rewards)/len(rewards))
-        return True
 
 
 def make_env(rank):
@@ -107,14 +74,20 @@ def make_env(rank):
 
 
 if __name__ == '__main__':
-    n_envs = 16
-    env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
-    env = VecMonitor(env)
-    n_steps = 8192 // n_envs
+    debug = True
+    if not debug:
+        n_envs = 16
+        env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
+        env = VecMonitor(env)
+        n_steps = 8192 // n_envs
+    else:
+        env = CREnv(opponent_model=random_strategy)
+        n_steps = 2048
+        n_envs = 1
 
     model_name = "cr_enhanced"
 
-    if not os.path.exists(f'{model_name}.zip'):
+    if (not os.path.exists(f'{model_name}.zip')) or debug:
         print('Previous checkpoint does not exisiting, training new one from scratch.')
         model = PPO(
             "MultiInputPolicy",
