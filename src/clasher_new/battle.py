@@ -729,8 +729,8 @@ class BattleState:
                     movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
                     e2.position.x += direction_vector.real*movement_ratio*overlap
                     e2.position.y += direction_vector.imag*movement_ratio*overlap
-                    e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap
-                    e1.position.y += -direction_vector.imag * (1-movement_ratio)*overlap
+                    e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap*0.5
+                    e1.position.y += -direction_vector.imag * (1-movement_ratio)*overlap*0.5
 
     def on_death(self, entity):
         if entity.name == 'King_PrincessTowers':

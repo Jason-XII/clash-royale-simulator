@@ -9,6 +9,7 @@ from card_utils import Card
 import numpy as np
 import time
 import subprocess
+import random
 
 from stable_baselines3 import PPO
 
@@ -19,7 +20,8 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-model = PPO.load('cr_logs/cr_20461248n_steps.zip')
+steps = ('15092976',)
+models = [PPO.load(f"cr_logs/cr_{each}_steps.zip", seed=None) for each in steps]
 
 xlow = 16
 xhigh = 1053
@@ -167,6 +169,7 @@ class Visualizer:
         }
         if time.time() - self.start_time > 1.5 and non_tower_count > 0:
             self.start_time = time.time()
+            model = random.choice(models)
             slot, y, x = model.predict(final_observation)[0]
             if slot != 0:
                 card_name = entity_names[hand[slot]]
