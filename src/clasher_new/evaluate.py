@@ -1,16 +1,16 @@
-import battle, player
+import random
+
+import numpy as np
+
+import battle
+import player
+from environment import CREnv, Position, player_0_deck, random_strategy, shuffle
 from new_visualization import Visualizer
+from strategies import STRATEGIES
 
-from environment import CREnv, random_strategy, player_0_deck, shuffle, Position
-from stable_baselines3 import PPO
-
-from tqdm import tqdm
-
-import sys
-
-import torch
 
 class SequentialEvalEnv(CREnv):
+    """Replay a fixed sequence of opponent deployments for model inspection."""
     def __init__(self, start_deck, events, visualize=False, speed=1.0):
         super().__init__(visualize=visualize, speed=speed)
         self.deck = start_deck
@@ -19,46 +19,48 @@ class SequentialEvalEnv(CREnv):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
         shuffle(player_0_deck)
-        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 9.0),
-                                         player.PlayerState(1, self.deck[:], 9.0))
+        self.battle = battle.BattleState(
+            player.PlayerState(0, player_0_deck[:], 9.0),
+            player.PlayerState(1, self.deck[:], 9.0),
+        )
         if self.visualize:
             self.visualizer = Visualizer(self.battle)
-
-        # Now return initial observation
         return self.observe(0), {}
 
     def opponent_action(self):
         for event in self.events:
-            card, x, y, t = event
-            if abs(self.battle.time - t) < 0.1:
-                self.battle.deploy_card(1, card, Position(18-(x+0.5), 32-(y+0.5)))
+            card, x, y, event_time = event
+            if abs(self.battle.time - event_time) < 0.1:
+                self.battle.deploy_card(1, card, Position(18 - (x + 0.5), 32 - (y + 0.5)))
 
 
+def evaluate_strategy(strategy, games=100, seed=0):
+    """Return wins and game lengths for a strategy playing as player 1."""
+    random.seed(seed)
+    np.random.seed(seed)
+    env = CREnv(opponent_model=strategy, visualize=False)
+    wins = 0
+    lengths = []
+    try:
+        for _ in range(games):
+            observation, _ = env.reset()
+            done = False
+            while not done:
+                action = random_strategy(observation)
+                observation, _, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+            wins += env.battle.winner == 1
+            lengths.append(env.battle.time)
+    finally:
+        env.close()
+    return wins, lengths
 
-# env = SequentialEvalEnv(start_deck=['Knight', 'MiniPekka', 'Arrows', 'Giant', 'Musketeer', 'Fireball', 'Minions', 'Archer'],
-#                         events=[('Giant', 3, 13, 0.5),
-#                                 ('MiniPekka', 3, 12, 0.5)],
-#                         visualize=True, speed=1)
 
-steps = ('20461248n_steps',)
-games_count = 50
-for step in steps:
-    model = PPO.load(f"cr_logs/cr_{step}.zip", seed=None)
-    env = CREnv(opponent_model=random_strategy, visualize=False)
-    print('Evaluating model at', step, 'steps:')
-    reward_total = 0
-    games_won = 0
-    for i in tqdm(range(games_count)):
-        obs, _ = env.reset()
-        done = False
-        while not done:
-            action, _ = model.predict(obs)
-            # print(action)
-            obs, reward, termination, truncation, info = env.step(action)
-            # tqdm.write(str(reward))
-            done = termination or truncation
-            reward_total += reward
-            # print(env.battle.players[0].elixir)
-        games_won += (1-env.battle.winner)
-    print("Win rate:", games_won/games_count, end=' ')
-    print("Mean reward:", reward_total/games_count)
+names = list(STRATEGIES)
+games = 10
+for name in names:
+    wins, lengths = evaluate_strategy(STRATEGIES[name], games, 67)
+    print(
+        f"{name:12} {wins:3d}-{10 - wins:<3d} "
+        f"win_rate={wins / games:6.1%} mean_game={np.mean(lengths):6.1f}s"
+    )
