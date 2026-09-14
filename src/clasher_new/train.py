@@ -1,9 +1,10 @@
 from environment import CREnv, random_strategy, entity_names
+from strategies import defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy
 
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 import torch.nn as nn
 import torch.nn.functional as F
@@ -59,33 +60,30 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         combined = torch.cat([grid_feat, hand_feat, elixir.float(), phase, time_left], dim=1)
         return torch.relu(self.fc(combined))
 
+opponent_pool = [defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy]
 
 def make_env(rank):
     def factory():
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        # model_names = os.listdir('opponent_pool')
-        # models = [PPO.load(f'opponent_pool/{name}') for name in model_names]
-        # model_funcs = [lambda o: m.predict(o)[0] for m in models]
-        # return CREnv(opponent_model=lambda o: m.predict(o)[0])
-        return CREnv(opponent_model=random_strategy)
+        return CREnv(opponent_pool=opponent_pool)
     return factory
 
 
 if __name__ == '__main__':
-    debug = True
+    debug = False
     if not debug:
         n_envs = 16
         env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
     else:
-        env = CREnv(opponent_model=random_strategy)
+        env = CREnv(opponent_pool=opponent_pool)
         n_steps = 2048
         n_envs = 1
 
-    model_name = "cr_enhanced"
+    model_name = "cr_moe"
 
     if (not os.path.exists(f'{model_name}.zip')) or debug:
         print('Previous checkpoint does not exisiting, training new one from scratch.')
@@ -105,7 +103,7 @@ if __name__ == '__main__':
             tensorboard_log=f"./{model_name}_dir/",
         )
     else:
-        model = PPO.load(model_name, env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,ent_coef = 0.001,tensorboard_log=f"./{model_name}_dir/")
+        model = PPO.load(model_name, env=env, device="cuda", learning_rate=1e-4, n_epochs=4,target_kl=0.03,tensorboard_log=f"./{model_name}_dir/")
     cb = CheckpointCallback(save_freq=20_000 // n_envs, save_path=f"./{model_name}_dir/", name_prefix="cr")
     try:
         model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=[cb])

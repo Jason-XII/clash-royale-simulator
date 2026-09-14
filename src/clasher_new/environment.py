@@ -1,5 +1,4 @@
 import battle, player
-from new_visualization import Visualizer
 from core import Position
 
 import gymnasium as gym
@@ -58,6 +57,7 @@ class CREnv(gym.Env):
         self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
                        player.PlayerState(1, player_1_deck[:], 5.0))
         if self.visualize:
+            from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
         return self.observe(0), {}
