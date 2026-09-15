@@ -6,7 +6,6 @@ import battle
 import player
 from environment import CREnv, Position, player_0_deck, random_strategy, shuffle
 from new_visualization import Visualizer
-from strategies import STRATEGIES
 from strategies import defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy
 
 from stable_baselines3 import PPO
@@ -80,16 +79,6 @@ def evaluate_model(model, strategy_pool, games=10, seed=0, visualize=False):
         finally:
             env.close()
         print('against', strategy.__name__, 'wins:', wins)
-
-
-# names = list(STRATEGIES)
-# games = 10
-# for name in names:
-#     wins, lengths = evaluate_strategy(STRATEGIES[name], games, 67)
-#     print(
-#         f"{name:12} {wins:3d}-{10 - wins:<3d} "
-#         f"win_rate={wins / games:6.1%} mean_game={np.mean(lengths):6.1f}s"
-#     )
 
 strategy_pool = [random_strategy, defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy]
 models = ['1000000', '2000000', '3000000', '4000000', '5000000', '6005312']

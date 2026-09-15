@@ -37,7 +37,7 @@ class CREnv(gym.Env):
         self.battle: battle.BattleState = None
         self.speed = speed
         self.observation_space = gym.spaces.Dict({
-            "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(32, 18, 15), dtype=np.float32),
+            "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8, 32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "phase": gym.spaces.Discrete(4),
@@ -47,6 +47,8 @@ class CREnv(gym.Env):
 
         self.visualize = visualize
         self.visualizer = None
+
+        self.history = []
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -60,6 +62,7 @@ class CREnv(gym.Env):
             from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
+        self.history = []
         return self.observe(0), {}
 
     def opponent_action(self):
@@ -164,9 +167,16 @@ class CREnv(gym.Env):
         else:
             phase = 4
             time_left = 300 - battle_time
-
+        if player_id_observe == 0:
+            # only stack when the player is 0, because I don't need to train using self-play yet.
+            if not self.history:
+                # just initialized, empty
+                self.history = [obs.copy() for _ in range(8)]
+            self.history.append(obs)
+            if len(self.history) > 8:
+                self.history.pop(0)
         return {
-            'grid': obs,
+            'grid': np.stack(self.history) if player_id_observe == 0 else obs,
             'hand': hand,
             'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
             'phase': phase-1,
@@ -181,5 +191,5 @@ def random_strategy(observation):
     return slot, y, x
 
 if __name__ == '__main__':
-    env = CREnv(random_strategy, visualize=True)
+    env = CREnv(random_strategy, visualize=False)
     check_env(env)

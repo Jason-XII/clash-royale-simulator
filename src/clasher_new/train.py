@@ -20,7 +20,11 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
         self.embedding_dim = 8
         self.entity_embedding = nn.Embedding(len(entity_names), self.embedding_dim)
-        self.in_channels = 13 + self.embedding_dim + 4
+
+        self.num_frames = int(observation_space["grid"].shape[0])
+        self.per_frame_channels = 13 + self.embedding_dim + 4
+        self.in_channels = self.num_frames * self.per_frame_channels
+
         self.cnn = nn.Sequential(
             nn.Conv2d(self.in_channels, 32, 3, padding=1), nn.ReLU(),
             nn.Conv2d(32, 64, 3, padding=1, stride=2), nn.ReLU(),
@@ -37,7 +41,7 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         Gets the observation, use the embedding (dim=8) to expand the channels, then use one-hot to further expand the channels.
         The code is ugly but should do the work.
         """
-        grid = observation['grid']  # (B, 32, 18, 15)
+        grid = observation['grid']  # (B, 8, 32, 18, 15)
         hand = observation['hand'].long()  # (B, 5)
         elixir = observation['elixir']
 
@@ -50,7 +54,8 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         card_type_oh = F.one_hot(card_type, num_classes=4).float()  # (B, 32, 18, 4)
         rest = x[..., 1:]
         x = torch.cat([rest, card_type_oh], dim=-1)
-        x = x.permute(0, 3, 1, 2).float()  # (B, C, 32, 18)
+        x = x.permute(0, 1, 4, 2, 3).contiguous()
+        x = x.flatten(1, 2).float()
 
         grid_feat = self.cnn(x)
 
@@ -83,10 +88,10 @@ if __name__ == '__main__':
         n_steps = 2048
         n_envs = 1
 
-    model_name = "cr_moe"
+    model_name = "cr_stacked_moe"
 
     if (not os.path.exists(f'{model_name}.zip')) or debug:
-        print('Previous checkpoint does not exisiting, training new one from scratch.')
+        print('Previous checkpoint does not existing, training new one from scratch.')
         model = PPO(
             "MultiInputPolicy",
             env,
