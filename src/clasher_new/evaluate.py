@@ -7,6 +7,11 @@ import player
 from environment import CREnv, Position, player_0_deck, random_strategy, shuffle
 from new_visualization import Visualizer
 from strategies import STRATEGIES
+from strategies import defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy
+
+from stable_baselines3 import PPO
+
+from tqdm import tqdm
 
 
 class SequentialEvalEnv(CREnv):
@@ -55,12 +60,42 @@ def evaluate_strategy(strategy, games=100, seed=0):
         env.close()
     return wins, lengths
 
+def evaluate_model(model, strategy_pool, games=10, seed=0, visualize=False):
+    random.seed(seed)
+    np.random.seed(seed)
+    for strategy in strategy_pool:
+        env = CREnv(opponent_model=strategy, visualize=visualize)
+        wins = 0
+        lengths = []
+        try:
+            for _ in tqdm(range(games)):
+                observation, _ = env.reset()
+                done = False
+                while not done:
+                    action, _ = model.predict(observation)
+                    observation, _, terminated, truncated, _ = env.step(action)
+                    done = terminated or truncated
+                wins += env.battle.winner == 0
+                lengths.append(env.battle.time)
+        finally:
+            env.close()
+        print('against', strategy.__name__, 'wins:', wins)
 
-names = list(STRATEGIES)
-games = 10
-for name in names:
-    wins, lengths = evaluate_strategy(STRATEGIES[name], games, 67)
-    print(
-        f"{name:12} {wins:3d}-{10 - wins:<3d} "
-        f"win_rate={wins / games:6.1%} mean_game={np.mean(lengths):6.1f}s"
-    )
+
+# names = list(STRATEGIES)
+# games = 10
+# for name in names:
+#     wins, lengths = evaluate_strategy(STRATEGIES[name], games, 67)
+#     print(
+#         f"{name:12} {wins:3d}-{10 - wins:<3d} "
+#         f"win_rate={wins / games:6.1%} mean_game={np.mean(lengths):6.1f}s"
+#     )
+
+strategy_pool = [random_strategy, defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy]
+models = ['1000000', '2000000', '3000000', '4000000', '5000000', '6005312']
+models_advanced = ['7005312', '7865312']
+models_final = ['10004192', '13004192', '15004192', '17004192', '19224192']
+for name in models_final:
+    print('Evaluating steps', name)
+    model = PPO.load(f'cr_moe_dir/cr_{name}_steps.zip')
+    evaluate_model(model, strategy_pool, 20, visualize=False)
