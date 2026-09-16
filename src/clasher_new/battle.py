@@ -282,7 +282,14 @@ class Troop(Entity):
             self.jumping_across_river = False
             self.data.is_air_unit = Card(self.name).is_air_unit
             self.speed = self.data.speed
-        current_target = self.update_current_target()
+        target = self.battle_state.entities.get(self.target_id)
+        if target is None or not target.is_alive or not target.targetable:
+            # scan immediately
+            current_target = self.update_current_target()
+        elif self.battle_state.tick % 2 == 0:
+            current_target = self.update_current_target()
+        else:
+            current_target = target
         # After the modification, we always have a target, sometimes it's in sight range, sometimes it's not
         # We use A* search for all cases to pathfind towards the target.
         # The case is even the same with ground troops and air troops.
@@ -300,7 +307,7 @@ class Troop(Entity):
             else:
                 if not self.path:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
-                elif self.in_sight_range(current_target) and self.battle_state.tick % 10 == 0:
+                elif self.in_sight_range(current_target) and self.battle_state.tick % 3 == 0:
                     self.path = EntityPathfinder(self, current_target, self.battle_state).calculate()
 
                 # determine the next waypoint and move towards that waypoint
