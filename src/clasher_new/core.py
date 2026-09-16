@@ -14,6 +14,8 @@ class BlankEntity:
         self.position = position
 
 class BasicCharacter:
+    # using to freeze the mechanics
+    pause_when_frozen = False
     def __init__(self, entity):
         self.entity = entity
         self.battle_state = self.entity.battle_state
@@ -38,3 +40,4 @@ class BasicCharacter:
         self.entity.attack_cooldown = self.data.hit_speed
         if self.entity.data.kamikaze:
             self.entity.is_alive = False
+    def on_freeze(self): pass

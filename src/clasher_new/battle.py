@@ -38,6 +38,9 @@ class Entity:
         self.buff_time_remaining = 0.0
         self.debuff_time_remaining = 0.0
 
+        # This is freeze function.
+        self.freeze_remaining = 0.0
+
         # This part is where flexibility comes in - some cards have special mechanics that can't be handled in
         # the entity/troop/buildings classes. So I created `BasicCharacter` to delegate most of the logic.
         # If a card doesn't have special logic like the knight and mini-pekka, then only `BasicCharacter` will be
@@ -79,7 +82,9 @@ class Entity:
         # and debuff_time attribute.
 
         # I assume this function will be called after the deployment and alive check.
-        self.entity_holder.on_tick(dt)
+        # self.entity_holder.on_tick(dt)
+        if not (self.freeze_remaining > 0 and self.entity_holder.pause_when_frozen):
+            self.entity_holder.on_tick(dt)
         if self.buff_time_remaining > 0:
             self.buff_time_remaining -= dt
         else:
@@ -93,6 +98,9 @@ class Entity:
             self.take_damage(pending_damage, delayed=False)
         self.pending_damage = []
 
+        if self.freeze_remaining > 0:
+            self.freeze_remaining -= dt
+        
 
     def take_damage(self, amount: float, delayed=False):
         """Apply damage to entity"""
@@ -236,6 +244,14 @@ class Entity:
     def near_river(self):
         return abs(self.position.y-15.0)<self.data.collision_radius or abs(self.position.y-17.0)<self.data.collision_radius
 
+    def apply_freeze(self, duration):
+        if not self.is_alive or self.invincible or duration <= 0:
+              return
+        # fresh the freeze time using max not add the time.
+        self.freeze_remaining = max(self.freeze_remaining, duration)
+
+        self.entity_holder.on_freeze()
+
 
 class Troop(Entity):
     def __init__(self, id, position, player, card_name, battle_state=None):
@@ -293,6 +309,10 @@ class Troop(Entity):
         # After the modification, we always have a target, sometimes it's in sight range, sometimes it's not
         # We use A* search for all cases to pathfind towards the target.
         # The case is even the same with ground troops and air troops.
+        
+        # freeze the moving and attack
+        if self.freeze_remaining > 0:
+            return
 
         # Move towards target if out of attack range
         if (not self.in_attack_range(current_target)) or self.jumping_across_river:
@@ -364,6 +384,10 @@ class Building(Entity):
         if not self.persistent:
             decay = (self.data.hp / float(self.data.lifetime)) * dt
             self.take_damage(decay)
+        # freeze the moving and attack
+        if self.freeze_remaining > 0:
+            return
+
         if self.attack_cooldown > 0:
             self.attack_cooldown = max(0, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         target = self.update_current_target()
@@ -459,8 +483,11 @@ class Projectile(Entity):
                 amount_dealt = self.proj.damage if "King" not in entity.name else round(self.proj.damage * self.proj.crown_tower_percent)
                 entity.take_damage(amount_dealt)
                 if self.proj.buff_time:
-                    entity.speed_debuff = min(1 + self.proj.target_buff['speedMultiplier'] / 100, entity.speed_debuff)
-                    entity.debuff_time_remaining = self.proj.buff_time
+                    if self.proj.target_buff.get('name') == 'Freeze':
+                        entity.apply_freeze(self.proj.buff_time)
+                    else:
+                        entity.speed_debuff = min(1 + self.proj.target_buff['speedMultiplier'] / 100, entity.speed_debuff)
+                        entity.debuff_time_remaining = self.proj.buff_time
 
     def _move_towards(self, target_pos, dt):
         """Move towards target position"""
@@ -759,5 +786,4 @@ class BattleState:
             elif attack_ground and not entity.data.is_air_unit:
                 if entity.position.distance_to(position) < range:
                     entity.take_damage(amount_dealt)
-
 

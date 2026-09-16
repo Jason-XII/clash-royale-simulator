@@ -3,6 +3,8 @@ from card_utils import Card
 from arena import TileGrid
 
 class Witch(BasicCharacter):
+    # using to freeze the mechanic
+    pause_when_frozen = True
     def __init__(self, entity):
         super().__init__(entity)
         self.next_spawn_remaining = 1.0
@@ -49,6 +51,8 @@ class LavaHound(BasicCharacter):
 
 class Prince(BasicCharacter):
     """Implements charging abilities."""
+    # using to freeze the mechanic
+    pause_when_frozen = True
     def __init__(self, entity):
         super().__init__(entity)
         self.starting_position = Position(self.entity.position.x, self.entity.position.y)
@@ -76,6 +80,11 @@ class Prince(BasicCharacter):
         if self.entity.data.kamikaze:
             self.entity.is_alive = False
             self.on_death()
+
+    def on_freeze(self):
+        self.charging = False
+        self.entity.speed = self.entity.data.speed
+        self.starting_position = Position(self.entity.position.x, self.entity.position.y)
 
 class DarkPrince(Prince):
     pass
