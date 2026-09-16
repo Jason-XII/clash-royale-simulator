@@ -326,12 +326,13 @@ class Troop(Entity):
 
 
 class Building(Entity):
-    def __init__(self, id, position, player, card_name, persistent=False):
+    def __init__(self, id, position, player, card_name, battle_state=None, persistent=False):
         super().__init__(id, position, player, card_name)
         self.deploy_delay_remaining = self.data.deploy_time
         self.lifetime_elapsed = 0.0
         self.target_id = None
         self.tower_active = False
+        self.battle_state = battle_state
         self.persistent = persistent
         self.name = self.data.name
 
@@ -353,9 +354,8 @@ class Building(Entity):
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
             return
         super().update(dt)
-        if self.data.lifetime > 0 and not self.persistent:
+        if not self.persistent:
             decay = (self.data.hp / float(self.data.lifetime)) * dt
-            self.take_damage(decay)
             self.take_damage(decay)
         if self.attack_cooldown > 0:
             self.attack_cooldown = max(0, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
