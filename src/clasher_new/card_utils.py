@@ -87,7 +87,7 @@ class Card:
         self.charge_damage = self.data['summonCharacterData'].get('damageSpecial', 0)
         self.shield_health = self.data['summonCharacterData'].get('shieldHitpoints', 0)
 
-        self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf'))
+        self.lifetime = self.data['summonCharacterData'].get('lifeTime', float('inf')) / 1000
 
         self.death_spawn_data = self.data['summonCharacterData'].get('deathSpawnCharacterData', {})
         self.death_area_effect = self.data['summonCharacterData'].get('deathAreaEffectData', {})

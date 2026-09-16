@@ -1,15 +1,144 @@
-from environment import CREnv, random_strategy
+import os
+import random
 
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+import numpy as np
 import torch
 import torch.nn as nn
+from gymnasium import spaces
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.policies import MultiInputActorCriticPolicy
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from torch.distributions import Categorical
 
+from environment import CREnv
+from strategies import (
+    bridge_pressure_strategy,
+    counterpush_strategy,
+    defensive_strategy,
+    split_lane_strategy,
+)
 from train import CRFeatureExtractor
 
-import random
-import numpy as np
+
+class AutoregressivePolicy(MultiInputActorCriticPolicy):
+    """Choose a card first, then choose a placement conditioned on it."""
+
+    def __init__(self, observation_space, action_space, lr_schedule, *args, **kwargs):
+        expected_nvec = np.array([5, 32, 18])
+        if not isinstance(action_space, spaces.MultiDiscrete) or not np.array_equal(
+            action_space.nvec, expected_nvec
+        ):
+            raise ValueError("AutoregressivePolicy requires MultiDiscrete([5, 32, 18]).")
+
+        super().__init__(observation_space, action_space, lr_schedule, *args, **kwargs)
+
+        latent_dim = self.mlp_extractor.latent_dim_pi
+        card_embedding_dim = 16
+        placement_hidden_dim = 64
+
+        # Replace SB3's independent MultiDiscrete action head.
+        self.action_net = nn.Identity()
+        self.card_head = nn.Linear(latent_dim, 5)
+        self.card_embedding = nn.Embedding(5, card_embedding_dim)
+        self.placement_net = nn.Sequential(
+            nn.Linear(latent_dim + card_embedding_dim, placement_hidden_dim),
+            nn.Tanh(),
+        )
+        self.y_head = nn.Linear(placement_hidden_dim, 32)
+        self.x_head = nn.Linear(placement_hidden_dim, 18)
+
+        # The parent created its optimizer before these new heads existed.
+        self.optimizer = self.optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
+        )
+
+    def _latents(self, obs):
+        features = self.extract_features(obs)
+        if self.share_features_extractor:
+            return self.mlp_extractor(features)
+
+        policy_features, value_features = features
+        latent_pi = self.mlp_extractor.forward_actor(policy_features)
+        latent_vf = self.mlp_extractor.forward_critic(value_features)
+        return latent_pi, latent_vf
+
+    def _placement_distributions(self, latent_pi, card):
+        conditioned = torch.cat((latent_pi, self.card_embedding(card)), dim=1)
+        placement_latent = self.placement_net(conditioned)
+        y_dist = Categorical(logits=self.y_head(placement_latent))
+        x_dist = Categorical(logits=self.x_head(placement_latent))
+        return y_dist, x_dist
+
+    def _sample_action(self, latent_pi, deterministic=False):
+        card_dist = Categorical(logits=self.card_head(latent_pi))
+        card = torch.argmax(card_dist.logits, dim=1) if deterministic else card_dist.sample()
+        y_dist, x_dist = self._placement_distributions(latent_pi, card)
+        if deterministic:
+            y = torch.argmax(y_dist.logits, dim=1)
+            x = torch.argmax(x_dist.logits, dim=1)
+        else:
+            y = y_dist.sample()
+            x = x_dist.sample()
+
+        # A no-op has no meaningful placement, so give it one canonical form.
+        play_card = card != 0
+        y = torch.where(play_card, y, torch.zeros_like(y))
+        x = torch.where(play_card, x, torch.zeros_like(x))
+        log_prob = card_dist.log_prob(card)
+        log_prob = log_prob + play_card.float() * (
+            y_dist.log_prob(y) + x_dist.log_prob(x)
+        )
+        return torch.stack((card, y, x), dim=1), log_prob
+
+    def _conditional_entropy(self, latent_pi, card_dist):
+        """Compute H(card) + E_card[H(position | card)] exactly."""
+        entropy = card_dist.entropy()
+        card_probabilities = card_dist.probs
+        for card_id in range(1, 5):
+            card = torch.full(
+                (latent_pi.shape[0],), card_id, dtype=torch.long, device=latent_pi.device
+            )
+            y_dist, x_dist = self._placement_distributions(latent_pi, card)
+            entropy = entropy + card_probabilities[:, card_id] * (
+                y_dist.entropy() + x_dist.entropy()
+            )
+        return entropy
+
+    def forward(self, obs, deterministic=False):
+        latent_pi, latent_vf = self._latents(obs)
+        values = self.value_net(latent_vf)
+        actions, log_prob = self._sample_action(latent_pi, deterministic)
+        return actions, values, log_prob
+
+    def evaluate_actions(self, obs, actions):
+        latent_pi, latent_vf = self._latents(obs)
+        values = self.value_net(latent_vf)
+
+        actions = actions.long()
+        card, y, x = actions[:, 0], actions[:, 1], actions[:, 2]
+        card_dist = Categorical(logits=self.card_head(latent_pi))
+        y_dist, x_dist = self._placement_distributions(latent_pi, card)
+        play_card = card != 0
+        log_prob = card_dist.log_prob(card)
+        log_prob = log_prob + play_card.float() * (
+            y_dist.log_prob(y) + x_dist.log_prob(x)
+        )
+        entropy = self._conditional_entropy(latent_pi, card_dist)
+        return values, log_prob, entropy
+
+    def _predict(self, observation, deterministic=False):
+        latent_pi, _ = self._latents(observation)
+        actions, _ = self._sample_action(latent_pi, deterministic)
+        return actions
+
+
+opponent_pool = [
+    defensive_strategy,
+    bridge_pressure_strategy,
+    split_lane_strategy,
+    counterpush_strategy,
+]
 
 
 def make_env(rank):
@@ -17,20 +146,59 @@ def make_env(rank):
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        return CREnv(opponent_model=random_strategy)
+        return CREnv(opponent_pool=opponent_pool)
+
     return factory
 
-n_envs = 8
-env = SubprocVecEnv([make_env(rank) for rank in range(n_envs)], start_method="spawn")
-env = VecMonitor(env)
-n_steps = 2048 // n_envs
 
-model = PPO(
-   "MultiInputPolicy",
-   env,
-   n_steps=n_steps,
-   batch_size=256,
-   policy_kwargs={"features_extractor_class": CRFeatureExtractor},
-   device="cuda",
-   verbose=1,
-)
+if __name__ == "__main__":
+    debug = False
+    if debug:
+        env = CREnv(opponent_pool=opponent_pool)
+        n_envs = 1
+        n_steps = 2048
+    else:
+        n_envs = 16
+        env = SubprocVecEnv(
+            [make_env(rank) for rank in range(n_envs)], start_method="spawn"
+        )
+        env = VecMonitor(env)
+        n_steps = 8192 // n_envs
+
+    model_name = "cr_autoregressive_moe"
+    policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
+    if not os.path.exists(f"{model_name}.zip") or debug:
+        model = PPO(
+            AutoregressivePolicy,
+            env,
+            policy_kwargs=policy_kwargs,
+            n_steps=n_steps,
+            batch_size=256,
+            learning_rate=1e-4,
+            n_epochs=4,
+            target_kl=0.03,
+            device="cuda",
+            seed=0,
+            verbose=1,
+            tensorboard_log=f"./{model_name}_dir/",
+        )
+    else:
+        model = PPO.load(
+            model_name,
+            env=env,
+            device="cuda",
+            learning_rate=1e-4,
+            n_epochs=4,
+            target_kl=0.03,
+            tensorboard_log=f"./{model_name}_dir/",
+        )
+
+    callback = CheckpointCallback(
+        save_freq=20_000 // n_envs,
+        save_path=f"./{model_name}_dir/",
+        name_prefix="cr",
+    )
+    try:
+        model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=callback)
+    finally:
+        model.save(model_name)

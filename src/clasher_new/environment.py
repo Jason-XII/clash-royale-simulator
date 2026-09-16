@@ -49,6 +49,7 @@ class CREnv(gym.Env):
         self.visualizer = None
 
         self.history = []
+        self.fps = 20
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -98,14 +99,14 @@ class CREnv(gym.Env):
 
         self.opponent_action()
         # only make decisions per half second
-        for i in range(30):
+        for i in range(self.fps//2):
             if self.battle.game_over:
                 break
             for j in range(int(self.speed)):
-                self.battle.step(1/60)
+                self.battle.step(1/self.fps)
             if self.visualizer:
                 self.visualizer.render_frame()
-                time.sleep(1/60)
+                time.sleep(1/self.fps)
         blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
         red_hps_new = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
         blue_left_new = 3-p0.get_crown_count()
@@ -144,10 +145,15 @@ class CREnv(gym.Env):
             damage = each.data.damage / 200
             projectile_damage = each.data.projectile_data.damage / 200
 
-            x, y = int(each.position.x), int(each.position.y)
+            x = int(np.clip(each.position.x, 0, 17))
+            y = int(np.clip(each.position.y, 0, 31))
+
             if player_id_observe == 1:
-                x = 17-x
-                y = 31-y
+                x = 17 - x
+                y = 31 - y
+            # sometimes, because of collision issues, x might be exactly 18 for player 0, which breaks the code
+            # so it needs to be clipped
+
             obs_arr = np.array([entity_id, card_type, player_id, elixir, speed, is_air, attacks_ground, attacks_air,
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
             obs[y][x] = obs_arr.copy()
