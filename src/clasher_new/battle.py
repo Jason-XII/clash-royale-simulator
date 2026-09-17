@@ -272,7 +272,7 @@ class Troop(Entity):
             super().update(dt)
         if self.deploy_delay_remaining > 0:
             self.deploy_delay_remaining = max(0.0, self.deploy_delay_remaining - dt)
-            return # Haven't finished deploying yet
+            return
         # Logic: the troop may have a current target (or doesn't), and `get_nearest_target` also gives a
         # recommended target. If current target exists, compare that with the recommendation to see
         # if it needs to switch. If it doesn't exist, use the best target. However, the best target may also
@@ -280,6 +280,7 @@ class Troop(Entity):
         if self.name != 'Miner':
             super().update(dt)
         # The miner needs to update before deployment.
+
         if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
             self.jumping_across_river = False
             self.data.is_air_unit = Card(self.name).is_air_unit
@@ -299,13 +300,13 @@ class Troop(Entity):
         # The case is even the same with ground troops and air troops.
 
         # Move towards target if out of attack range
-        if (not self.in_attack_range(current_target)) or self.jumping_across_river:
-            has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river() and self.in_sight_range(current_target)
-            if not self.jumping_across_river and has_jump_ability:
-                self.start_jumping_position = Position(self.position.x, self.position.y)
-                self.jumping_across_river = True
-                self.data.is_air_unit = True
-                self.speed = self.data.jump_speed
+        if not self.in_attack_range(current_target):
+            # has_jump_ability = self.data.jump_speed and self.on_both_sides_of_river(current_target) and self.near_river() and self.in_sight_range(current_target)
+            # if not self.jumping_across_river and has_jump_ability:
+            #     self.start_jumping_position = Position(self.position.x, self.position.y)
+            #     self.jumping_across_river = True
+            #     self.data.is_air_unit = True
+            #     self.speed = self.data.jump_speed
             if self.data.is_air_unit:
                 self.move_towards(current_target.position, dt, True)
             else:
@@ -323,10 +324,7 @@ class Troop(Entity):
                 if dot >= 0:
                     # move towards next waypoint
                     index += 1
-                if index == len(self.path):
-                    self.move_towards(current_target.position, dt, True)
-                else:
-                    self.move_towards(self.path[index], dt, True)
+                self.move_towards(self.path[index], dt, True)
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:

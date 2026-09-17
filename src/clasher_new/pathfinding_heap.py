@@ -92,7 +92,10 @@ class EntityPathfinder:
                 px, py = current
                 tile_char = contents[63-ny][nx]
                 if tile_char == 'W':
-                    tile_cost = 800 if not self.entity.data.is_air_unit else 7
+                    if self.entity.data.is_air_unit or self.entity.data.jump_speed:
+                        tile_cost = 7
+                    else:
+                        tile_cost = 50
                 elif tile_char == '.':
                     tile_cost = 8
                 else:

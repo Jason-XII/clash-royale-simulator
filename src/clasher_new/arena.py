@@ -19,10 +19,6 @@ class TileGrid:
     RIVER_Y1 = 15.0
     RIVER_Y2 = 16.0
     BLOCKED_TILES = [
-        # Edge tiles next to river
-        (0, 15), (0, 16), (1, 15), (1, 16),
-        *[(i, j) for i in range(5, 13) for j in range(15, 17)], # (5, 15) to (12, 16)
-        (16, 15), (16, 16), (17, 15), (17, 16),
         
         # Top row (y=0): 6 gray fences (0-5), 6 green king area (6-11), 6 gray fences (12-17)
         (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0),           # Left 6 gray fence tiles
@@ -54,10 +50,6 @@ class TileGrid:
             return walkable_cache[int_pos]
         if not self.is_valid_position(pos) or self.is_blocked_tile(int(pos.x), int(pos.y)):
             walkable_cache[int_pos] = False
-        elif self.RIVER_Y1 <= pos.y <= self.RIVER_Y2:
-            on_left_bridge = 2.0 <= pos.x < 5.0
-            on_right_bridge = 13.0 <= pos.x < 16.0
-            walkable_cache[int_pos] = on_left_bridge or on_right_bridge
         else:
             walkable_cache[int_pos] = True
         return walkable_cache[int_pos]
