@@ -23,6 +23,8 @@ class BattleView:
     @classmethod
     def from_observation(cls, observation):
         grid = np.asarray(observation["grid"])
+        if grid.ndim == 4:
+            grid = grid[-1]
         hand = np.asarray(observation["hand"])
         cells = []
         for y, x in np.argwhere(grid[:, :, 0] > 0):
@@ -33,6 +35,7 @@ class BattleView:
                 "owner": int(row[2]),
                 "air": bool(row[5]),
                 "hp": float(row[9]),
+                "cost": float(row[3]),
                 "y": int(y),
                 "x": int(x),
             })
@@ -92,11 +95,17 @@ class BattleView:
         return (y, x), len(best_group)
 
 
-def _spell_group(view, minimum_size=2):
+def _spell_group(view, minimum_size=2, minimum_value=6):
     target, size = view.densest_enemy_group()
     if target is None or size < minimum_size:
         return None
     y, x = target
+    group_value = sum(
+        entity["cost"] for entity in view.enemy_troops
+        if (entity["x"] - x) ** 2 + (entity["y"] - y) ** 2 <= 3.0 ** 2
+    )
+    if group_value < minimum_value:
+        return None
     return view.first_action(("Fireball", "Arrows"), y, x)
 
 
@@ -109,18 +118,23 @@ def _defend(view, trigger_y, ground_priority):
         priority = ("Musketeer", "Minions", "Archer")
     else:
         priority = ground_priority
-    # Meet attackers above the towers while avoiding their occupied tiles.
-    return view.first_action(priority, max(9, threat["y"] - 2), threat["x"])
+    for name in priority:
+        y = threat["y"] - 3 if name in ("Musketeer", "Archer") else threat["y"]
+        action = view.action(name, int(np.clip(y, 8, 14)), threat["x"])
+        if action is not None:
+            return action
+    # Do not start an attack while an unanswered threat is on our side.
+    return (0, 0, 0)
 
 
 def bridge_pressure_strategy(observation):
-    """Build one tank-and-support push in the weaker enemy lane."""
+    """Build a protected Giant push instead of feeding troops at the bridge."""
     view = BattleView.from_observation(observation)
 
-    action = _spell_group(view, minimum_size=2)
+    action = _spell_group(view, minimum_size=2, minimum_value=6)
     if action is not None:
         return action
-    action = _defend(view, 12, ("MiniPekka", "Knight", "Musketeer", "Archer", "Minions"))
+    action = _defend(view, 16, ("MiniPekka", "Knight", "Musketeer", "Archer", "Minions"))
     if action is not None:
         return action
 
@@ -128,39 +142,42 @@ def bridge_pressure_strategy(observation):
     if giants:
         giant = max(giants, key=lambda entity: entity["y"])
         action = view.first_action(
-            ("Musketeer", "Minions", "Archer", "MiniPekka", "Knight"),
-            max(8, giant["y"] - 3), giant["x"],
+            ("Musketeer", "Archer", "Minions", "MiniPekka", "Knight"),
+            int(np.clip(giant["y"] - 3, 5, 14)), giant["x"],
         )
         if action is not None:
             return action
 
     if view.elixir >= 8:
-        action = view.action("Giant", 13)
+        action = view.action("Giant", 8)
         if action is not None:
             return action
-    action = view.first_action(("MiniPekka", "Knight", "Minions", "Musketeer", "Archer"), 14)
-    return action or (0, 0, 0)
+        return view.first_action(
+            ("Musketeer", "Archer", "Minions", "Knight", "MiniPekka"), 8
+        ) or (0, 0, 0)
+    return (0, 0, 0)
 
 
 def split_lane_strategy(observation):
-    """Apply cheap pressure opposite the lane containing the most friendly troops."""
+    """Defend first, then force the quieter lane when enough elixir is banked."""
     view = BattleView.from_observation(observation)
 
-    action = _defend(view, 10, ("Knight", "MiniPekka", "Minions", "Archer", "Musketeer"))
+    action = _spell_group(view, minimum_size=2, minimum_value=7)
     if action is not None:
         return action
-    action = _spell_group(view, minimum_size=3)
+    action = _defend(view, 16, ("MiniPekka", "Knight", "Musketeer", "Minions", "Archer"))
     if action is not None:
         return action
 
-    left = sum(entity["x"] < 9 for entity in view.own_troops)
-    right = len(view.own_troops) - left
-    pressure_x = 14 if left > right else 3
-    action = view.first_action(("MiniPekka", "Knight", "Minions", "Archer", "Musketeer"), 14, pressure_x)
-    if action is not None:
-        return action
-    if view.elixir >= 9:
-        action = view.action("Giant", 12, pressure_x)
+    if view.elixir >= 8:
+        enemy_left = sum(entity["x"] < 9 for entity in view.enemy_troops)
+        enemy_right = len(view.enemy_troops) - enemy_left
+        pressure_x = 14 if enemy_left > enemy_right else 3
+        action = view.first_action(
+            ("MiniPekka", "Knight", "Minions", "Musketeer", "Archer"),
+            13,
+            pressure_x,
+        )
         if action is not None:
             return action
     return (0, 0, 0)
@@ -170,24 +187,26 @@ def counterpush_strategy(observation):
     """Bank elixir, defend deeply, then place a Giant in front of survivors."""
     view = BattleView.from_observation(observation)
 
-    action = _spell_group(view, minimum_size=2)
+    action = _spell_group(view, minimum_size=2, minimum_value=6)
     if action is not None:
         return action
-    action = _defend(view, 15, ("MiniPekka", "Knight", "Musketeer", "Minions", "Archer"))
+    action = _defend(view, 17, ("MiniPekka", "Knight", "Musketeer", "Minions", "Archer"))
     if action is not None:
         return action
 
-    survivors = [entity for entity in view.own_troops if entity["y"] >= 9]
-    if survivors and view.elixir >= 7:
+    survivors = [entity for entity in view.own_troops if entity["y"] >= 8]
+    if survivors and view.elixir >= 8:
         front = max(survivors, key=lambda entity: entity["y"])
         action = view.action("Giant", min(14, front["y"] + 2), front["x"])
         if action is not None:
             return action
-    if view.elixir >= 9.5:
+    if view.elixir >= 8:
         action = view.action("Giant", 8)
         if action is not None:
             return action
-        return view.first_action(("Knight", "MiniPekka", "Musketeer", "Minions", "Archer"), 10) or (0, 0, 0)
+        return view.first_action(
+            ("Musketeer", "Archer", "Minions", "Knight", "MiniPekka"), 8
+        ) or (0, 0, 0)
     return (0, 0, 0)
 
 
