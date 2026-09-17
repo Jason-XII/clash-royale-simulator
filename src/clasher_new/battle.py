@@ -41,14 +41,16 @@ class Entity:
         # This part is where flexibility comes in - some cards have special mechanics that can't be handled in
         # the entity/troop/buildings classes. So I created `BasicCharacter` to delegate most of the logic.
         # If a card doesn't have special logic like the knight and mini-pekka, then only `BasicCharacter` will be
-        # used.
+        # used. Projectiles currently don't have EntityHolders, but we may need a special one for firecracker.
         self.entity_holder = BasicCharacter(self)
         if self.card_name in globals() and not isinstance(self, Projectile):
             self.entity_holder = eval(f"{self.card_name}(self)")
+
+        # Note that `on_spawn` is directly called when this object is initialized, so we only create entity objects directly
+        # before we spawn them.
         self.entity_holder.on_spawn()
 
         self.path = []
-
         self.pending_damage = []
 
     def to_dict(self):
@@ -70,6 +72,7 @@ class Entity:
         """Automatically call entity holder's on_death to prevent bugs"""
         self.is_alive = False
         self.entity_holder.on_death()
+        # We also call `battle_state.on_death()` because the death of a princess tower should activate the king tower.
         self.battle_state.on_death(self)
 
     def update(self, dt):
@@ -92,7 +95,6 @@ class Entity:
         for pending_damage in self.pending_damage:
             self.take_damage(pending_damage, delayed=False)
         self.pending_damage = []
-
 
     def take_damage(self, amount: float, delayed=False):
         """Apply damage to entity"""
@@ -283,6 +285,8 @@ class Troop(Entity):
             self.data.is_air_unit = Card(self.name).is_air_unit
             self.speed = self.data.speed
         target = self.battle_state.entities.get(self.target_id)
+
+        # I used this weird target selection logic to save time, so target are calculated every 0.1s max instead of every frame
         if target is None or not target.is_alive or not target.targetable:
             # scan immediately
             current_target = self.update_current_target()

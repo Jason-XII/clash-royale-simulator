@@ -11,7 +11,7 @@ from stable_baselines3.common.policies import MultiInputActorCriticPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from torch.distributions import Categorical
 
-from environment import CREnv
+from environment import CREnv, entity_names
 from strategies import (
     bridge_pressure_strategy,
     counterpush_strategy,
@@ -133,6 +133,164 @@ class AutoregressivePolicy(MultiInputActorCriticPolicy):
         return actions
 
 
+class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
+    """Score actual hand cards, mask unaffordable ones, then place the selected card."""
+
+    CARD_COSTS = {
+        "Knight": 3,
+        "MiniPekka": 4,
+        "Arrows": 3,
+        "Minions": 3,
+        "Archer": 3,
+        "Musketeer": 4,
+        "Fireball": 4,
+        "Giant": 5,
+    }
+
+    def __init__(self, observation_space, action_space, lr_schedule, *args, **kwargs):
+        expected_nvec = np.array([5, 32, 18])
+        if not isinstance(action_space, spaces.MultiDiscrete) or not np.array_equal(
+            action_space.nvec, expected_nvec
+        ):
+            raise ValueError(
+                "ContentMaskedAutoregressivePolicy requires MultiDiscrete([5, 32, 18])."
+            )
+
+        super().__init__(observation_space, action_space, lr_schedule, *args, **kwargs)
+
+        latent_dim = self.mlp_extractor.latent_dim_pi
+        card_embedding_dim = 16
+        hidden_dim = 64
+
+        self.action_net = nn.Identity()
+        self.card_embedding = nn.Embedding(len(entity_names), card_embedding_dim)
+        self.card_scorer = nn.Sequential(
+            nn.Linear(latent_dim + card_embedding_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1),
+        )
+        self.noop_head = nn.Linear(latent_dim, 1)
+        self.placement_net = nn.Sequential(
+            nn.Linear(latent_dim + card_embedding_dim, hidden_dim),
+            nn.Tanh(),
+        )
+        self.y_head = nn.Linear(hidden_dim, 32)
+        self.x_head = nn.Linear(hidden_dim, 18)
+
+        cost_table = torch.full((len(entity_names),), float("inf"))
+        cost_table[0] = 0.0
+        for card_name, cost in self.CARD_COSTS.items():
+            cost_table[entity_names.index(card_name)] = float(cost)
+        self.register_buffer("card_cost_table", cost_table)
+
+        # The parent created its optimizer before these new heads existed.
+        self.optimizer = self.optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
+        )
+
+    def _latents(self, obs):
+        features = self.extract_features(obs)
+        if self.share_features_extractor:
+            return self.mlp_extractor(features)
+
+        policy_features, value_features = features
+        latent_pi = self.mlp_extractor.forward_actor(policy_features)
+        latent_vf = self.mlp_extractor.forward_critic(value_features)
+        return latent_pi, latent_vf
+
+    def _card_distribution(self, latent_pi, obs):
+        hand = obs["hand"][:, :4].long()
+        card_vectors = self.card_embedding(hand)
+        state = latent_pi.unsqueeze(1).expand(-1, hand.shape[1], -1)
+        card_scores = self.card_scorer(
+            torch.cat((state, card_vectors), dim=2)
+        ).squeeze(2)
+
+        elixir = obs["elixir"].float().reshape(-1, 1)
+        costs = self.card_cost_table[hand]
+        affordable = costs <= elixir
+        card_scores = card_scores.masked_fill(~affordable, -1e9)
+
+        noop_score = self.noop_head(latent_pi)
+        logits = torch.cat((noop_score, card_scores), dim=1)
+        return Categorical(logits=logits), hand
+
+    @staticmethod
+    def _selected_card_ids(hand, slot):
+        hand_index = (slot - 1).clamp(0, 3)
+        selected_card = hand.gather(1, hand_index.unsqueeze(1)).squeeze(1)
+        return torch.where(slot == 0, torch.zeros_like(selected_card), selected_card)
+
+    def _placement_distributions(self, latent_pi, selected_card):
+        conditioned = torch.cat(
+            (latent_pi, self.card_embedding(selected_card)), dim=1
+        )
+        placement_latent = self.placement_net(conditioned)
+        y_dist = Categorical(logits=self.y_head(placement_latent))
+        x_dist = Categorical(logits=self.x_head(placement_latent))
+        return y_dist, x_dist
+
+    def _sample_action(self, latent_pi, obs, deterministic=False):
+        card_dist, hand = self._card_distribution(latent_pi, obs)
+        slot = torch.argmax(card_dist.logits, dim=1) if deterministic else card_dist.sample()
+        selected_card = self._selected_card_ids(hand, slot)
+        y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
+
+        if deterministic:
+            y = torch.argmax(y_dist.logits, dim=1)
+            x = torch.argmax(x_dist.logits, dim=1)
+        else:
+            y = y_dist.sample()
+            x = x_dist.sample()
+
+        play_card = slot != 0
+        y = torch.where(play_card, y, torch.zeros_like(y))
+        x = torch.where(play_card, x, torch.zeros_like(x))
+        log_prob = card_dist.log_prob(slot)
+        log_prob = log_prob + play_card.float() * (
+            y_dist.log_prob(y) + x_dist.log_prob(x)
+        )
+        return torch.stack((slot, y, x), dim=1), log_prob
+
+    def _conditional_entropy(self, latent_pi, card_dist, hand):
+        entropy = card_dist.entropy()
+        for slot in range(1, 5):
+            selected_card = hand[:, slot - 1]
+            y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
+            entropy = entropy + card_dist.probs[:, slot] * (
+                y_dist.entropy() + x_dist.entropy()
+            )
+        return entropy
+
+    def forward(self, obs, deterministic=False):
+        latent_pi, latent_vf = self._latents(obs)
+        values = self.value_net(latent_vf)
+        actions, log_prob = self._sample_action(latent_pi, obs, deterministic)
+        return actions, values, log_prob
+
+    def evaluate_actions(self, obs, actions):
+        latent_pi, latent_vf = self._latents(obs)
+        values = self.value_net(latent_vf)
+
+        actions = actions.long()
+        slot, y, x = actions[:, 0], actions[:, 1], actions[:, 2]
+        card_dist, hand = self._card_distribution(latent_pi, obs)
+        selected_card = self._selected_card_ids(hand, slot)
+        y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
+        play_card = slot != 0
+        log_prob = card_dist.log_prob(slot)
+        log_prob = log_prob + play_card.float() * (
+            y_dist.log_prob(y) + x_dist.log_prob(x)
+        )
+        entropy = self._conditional_entropy(latent_pi, card_dist, hand)
+        return values, log_prob, entropy
+
+    def _predict(self, observation, deterministic=False):
+        latent_pi, _ = self._latents(observation)
+        actions, _ = self._sample_action(latent_pi, observation, deterministic)
+        return actions
+
+
 opponent_pool = [
     defensive_strategy,
     bridge_pressure_strategy,
@@ -152,7 +310,7 @@ def make_env(rank):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     if debug:
         env = CREnv(opponent_pool=opponent_pool)
         n_envs = 1
@@ -165,11 +323,11 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_autoregressive_moe"
+    model_name = "cr_masked_moe"
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
     if not os.path.exists(f"{model_name}.zip") or debug:
         model = PPO(
-            AutoregressivePolicy,
+            ContentMaskedAutoregressivePolicy,
             env,
             policy_kwargs=policy_kwargs,
             n_steps=n_steps,
@@ -194,7 +352,7 @@ if __name__ == "__main__":
         )
 
     callback = CheckpointCallback(
-        save_freq=20_000 // n_envs,
+        save_freq=100_000 // n_envs,
         save_path=f"./{model_name}_dir/",
         name_prefix="cr",
     )
