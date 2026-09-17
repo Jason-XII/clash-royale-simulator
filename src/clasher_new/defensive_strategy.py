@@ -34,7 +34,7 @@ def _action(hand, name, y, x):
 
 
 def defensive_strategy(observation):
-    """Defend the near side, then make a measured Giant counter-push.
+    """Defend the near side, then build a patient Giant counter-push.
 
     ``CREnv.observe`` presents the acting player's arena in a common frame:
     own towers are near ``y=0`` and the opponent approaches from ``y=31``.
@@ -44,66 +44,113 @@ def defensive_strategy(observation):
     hand = np.asarray(observation["hand"])
     elixir = float(np.asarray(observation["elixir"])[0])
     grid = np.asarray(observation["grid"])
+    if grid.ndim == 4:
+        grid = grid[-1]
 
-    # Row fields are [entity_id, type, owner, elixir, speed, air, ground,
-    # air_target, hp_log, hp_fraction, hit_speed, range, sight, damage,
-    # projectile_damage].
-    rows = grid.reshape(-1, grid.shape[-1])
-    entities = rows[rows[:, 0] > 0]
-    enemies = entities[(entities[:, 2] == 1) & (entities[:, 1] == 1)]
-    own = entities[(entities[:, 2] == 0) & (entities[:, 1] == 1)]
+    cells = []
+    for y, x in np.argwhere(grid[:, :, 0] > 0):
+        row = grid[y, x]
+        cells.append({
+            "id": int(row[0]),
+            "type": int(row[1]),
+            "owner": int(row[2]),
+            "air": bool(row[5]),
+            "hp": float(row[9]),
+            "y": int(y),
+            "x": int(x),
+        })
 
-    # Remove the next card from consideration: only cycle[:4] is playable.
+    enemy_troops = [
+        entity for entity in cells
+        if entity["owner"] == 1 and entity["type"] == 1
+    ]
+    own_troops = [
+        entity for entity in cells
+        if entity["owner"] == 0 and entity["type"] == 1
+    ]
     available = {
         ENTITY_NAMES[int(index)]
         for index in hand[:4]
         if 0 <= int(index) < len(ENTITY_NAMES)
+        and ENTITY_NAMES[int(index)] in ELIXIR_COST
+        and elixir >= ELIXIR_COST[ENTITY_NAMES[int(index)]]
     }
 
-    def affordable(name):
-        return name in available and elixir >= ELIXIR_COST[name]
+    def first_action(names, y, x):
+        for name in names:
+            if name in available:
+                return _action(hand, name, y, x)
+        return None
 
-    # Spells are the highest-value response to a compact group of attackers.
-    if len(enemies) >= 2:
-        # Grid coordinates are encoded by array position, not in the feature
-        # vector, so recover them from non-empty cells for spell placement.
-        cells = np.argwhere((grid[:, :, 0] > 0) & (grid[:, :, 2] == 1) &
-                            (grid[:, :, 1] == 1))
-        if len(cells):
-            y, x = np.mean(cells, axis=0)
-            if affordable("Fireball"):
-                return _action(hand, "Fireball", y, x)
-            if affordable("Arrows"):
-                return _action(hand, "Arrows", y, x)
+    # Spend a spell only when at least three enemies form one local cluster.
+    if len(enemy_troops) >= 3:
+        best_group = []
+        for center in enemy_troops:
+            group = [
+                entity for entity in enemy_troops
+                if (entity["x"] - center["x"]) ** 2
+                + (entity["y"] - center["y"]) ** 2 <= 2.5 ** 2
+            ]
+            if len(group) > len(best_group):
+                best_group = group
+        if len(best_group) >= 3:
+            target_y = round(sum(entity["y"] for entity in best_group) / len(best_group))
+            target_x = round(sum(entity["x"] for entity in best_group) / len(best_group))
+            action = first_action(("Fireball", "Arrows"), target_y, target_x)
+            if action is not None:
+                return action
 
-    # A threat below the river is already attacking our side.  Deploy a
-    # suitable defender two tiles in front of the nearest tower.
-    intruder_cells = np.argwhere((grid[:, :, 0] > 0) & (grid[:, :, 2] == 1) &
-                                 (grid[:, :, 1] == 1) &
-                                 (np.indices(grid.shape[:2])[0] < 16))
-    if len(intruder_cells):
-        y, x = np.mean(intruder_cells, axis=0)
-        threat_is_air = bool(np.any(grid[intruder_cells[:, 0], intruder_cells[:, 1], 5] > 0))
+    # Answer the deepest intruder with a suitable counter. Ranged defenders
+    # stay behind the threat, while melee defenders meet it directly.
+    intruders = [entity for entity in enemy_troops if entity["y"] <= 16]
+    if intruders:
+        threat = min(intruders, key=lambda entity: entity["y"])
         priority = (
-            ("Musketeer", "Archer", "Minions", "MiniPekka", "Knight")
-            if threat_is_air else
+            ("Musketeer", "Archer", "Minions")
+            if threat["air"] else
             ("MiniPekka", "Knight", "Musketeer", "Archer", "Minions")
         )
         for name in priority:
-            if affordable(name):
-                return _action(hand, name, max(8, y - 2), x)
+            if name not in available:
+                continue
+            target_y = threat["y"] - 3 if name in ("Musketeer", "Archer") else threat["y"]
+            return _action(hand, name, int(np.clip(target_y, 8, 14)), threat["x"])
+        return 0, 0, 0
 
-    # Support a surviving front-line unit instead of stacking another tank.
-    if len(own) and affordable("Musketeer"):
-        cells = np.argwhere((grid[:, :, 0] > 0) & (grid[:, :, 2] == 0) &
-                            (grid[:, :, 1] == 1))
-        if len(cells):
-            y, x = np.mean(cells, axis=0)
-            return _action(hand, "Musketeer", max(5, y - 2), x)
+    # Add ranged support behind an existing Giant instead of supporting every
+    # surviving troop and accidentally turning defense into bridge spam.
+    giants = [
+        entity for entity in own_troops
+        if entity["id"] == ENTITY_NAMES.index("Giant")
+    ]
+    if giants:
+        giant = max(giants, key=lambda entity: entity["y"])
+        action = first_action(
+            ("Musketeer", "Archer", "Minions"),
+            int(np.clip(giant["y"] - 3, 5, 14)),
+            giant["x"],
+        )
+        if action is not None:
+            return action
 
-    # Otherwise save elixir for a simple, repeatable counter-push.
-    if elixir >= ELIXIR_COST["Giant"] and affordable("Giant"):
-        return _action(hand, "Giant", 10, 9)
+    # Bank elixir, then start a push in the weaker enemy princess-tower lane.
+    if elixir < 8:
+        return 0, 0, 0
+    enemy_towers = [
+        entity for entity in cells
+        if entity["owner"] == 1
+        and entity["id"] == ENTITY_NAMES.index("King_PrincessTowers")
+        and entity["hp"] > 0
+    ]
+    target_x = min(enemy_towers, key=lambda entity: (entity["hp"], entity["x"]))["x"] \
+        if enemy_towers else 3
+    action = first_action(
+        ("Giant", "Musketeer", "Archer", "Minions", "Knight", "MiniPekka"),
+        8,
+        target_x,
+    )
+    if action is not None:
+        return action
 
     return 0, 0, 0
 
