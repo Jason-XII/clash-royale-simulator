@@ -301,7 +301,7 @@ def make_env(rank):
 
 
 if __name__ == "__main__":
-    debug = True
+    debug = False
     if debug:
         env = CREnv(opponent_pool=opponent_pool)
         n_envs = 1
@@ -314,9 +314,11 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_masked_moe"
+    model_name = "cr_entropy"
+    start_checkpoint = "cr_masked_moe_dir/cr_24694976_steps.zip"
+    ent_coef = 0.003
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
-    if not os.path.exists(f"{model_name}.zip") or debug:
+    if debug:
         model = PPO(
             ContentMaskedAutoregressivePolicy,
             env,
@@ -326,6 +328,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             n_epochs=4,
             target_kl=0.03,
+            ent_coef=ent_coef,
             device="cuda",
             seed=0,
             verbose=1,
@@ -333,15 +336,15 @@ if __name__ == "__main__":
         )
     else:
         model = PPO.load(
-            model_name,
+            start_checkpoint,
             env=env,
             device="cuda",
             learning_rate=1e-4,
             n_epochs=4,
             target_kl=0.03,
+            ent_coef=ent_coef,
             tensorboard_log=f"./{model_name}_dir/",
         )
-
     callback = CheckpointCallback(
         save_freq=100_000 // n_envs,
         save_path=f"./{model_name}_dir/",

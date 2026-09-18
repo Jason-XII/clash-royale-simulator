@@ -3,10 +3,11 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import torch
 
 import battle
 import player
-from environment import CREnv, Position, player_0_deck, random_strategy, shuffle
+from environment import CREnv, Position, entity_names, player_0_deck, random_strategy, shuffle
 from strategies import defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy
 
 from stable_baselines3 import PPO
@@ -204,6 +205,79 @@ def evaluate_checkpoints(checkpoints, strategy_pool, games=20, seed=0):
             checkpoint, strategy_pool, games=games, seed=seed
         )
     return all_results
+
+
+@torch.no_grad()
+def compare_policy_entropy(checkpoints, strategy_pool, games=3, seed=0):
+    """Compare masked-policy uncertainty on one shared set of observations."""
+    models = [PPO.load(checkpoint, device="auto") for checkpoint in checkpoints]
+    stats = [dict(states=0, forced=0, actionable=0, action_entropy=0.0,
+                  card_entropy=0.0, actionable_noop=0.0,
+                  placement_entropy=0.0, noop_probability=0.0,
+                  cards=np.zeros(len(entity_names))) for _ in models]
+
+    def record(model, observation, stat):
+        obs, _ = model.policy.obs_to_tensor(observation)
+        latent, _ = model.policy._latents(obs)
+        distribution, hand = model.policy._card_distribution(latent, obs)
+        probabilities = distribution.probs
+        play_probability = probabilities[:, 1:].sum(dim=1)
+        affordable = model.policy.card_cost_table[hand] <= obs["elixir"].reshape(-1, 1)
+
+        stat["states"] += 1
+        stat["noop_probability"] += probabilities[0, 0].item()
+        if not affordable.any():
+            stat["forced"] += 1
+            return
+
+        stat["actionable"] += 1
+        conditional = probabilities[:, 1:] / play_probability.unsqueeze(1)
+        stat["action_entropy"] += distribution.entropy().item()
+        stat["actionable_noop"] += probabilities[0, 0].item()
+        stat["card_entropy"] += torch.distributions.Categorical(
+            probs=conditional
+        ).entropy().item()
+
+        cards = hand.reshape(-1)
+        repeated_latent = latent.repeat_interleave(4, dim=0)
+        y_dist, x_dist = model.policy._placement_distributions(repeated_latent, cards)
+        placement = (y_dist.entropy() + x_dist.entropy()).reshape(-1, 4)
+        stat["placement_entropy"] += (conditional * placement).sum(dim=1).item()
+        for slot in range(4):
+            stat["cards"][hand[0, slot].item()] += probabilities[0, slot + 1].item()
+
+    collector = models[0]
+    for strategy in strategy_pool:
+        random.seed(seed)
+        np.random.seed(seed)
+        env = CREnv(opponent_model=strategy, visualize=False)
+        try:
+            for _ in tqdm(range(games), desc=strategy.__name__, leave=False):
+                observation, _ = env.reset()
+                done = False
+                while not done:
+                    for model, stat in zip(models, stats):
+                        record(model, observation, stat)
+                    action, _ = collector.predict(observation, deterministic=True)
+                    observation, _, terminated, truncated, _ = env.step(action)
+                    done = terminated or truncated
+        finally:
+            env.close()
+
+    for checkpoint, stat in zip(checkpoints, stats):
+        actionable = stat["actionable"]
+        print(f"\n{checkpoint}")
+        print(f"  forced no-op states: {stat['forced'] / stat['states']:.1%}")
+        print(f"  mean no-op probability: {stat['noop_probability'] / stat['states']:.3f}")
+        print(f"  actionable no-op probability: {stat['actionable_noop'] / actionable:.3f}")
+        print(f"  actionable action entropy: {stat['action_entropy'] / actionable:.3f}")
+        print(f"  card entropy conditional on playing: {stat['card_entropy'] / actionable:.3f}")
+        print(f"  conditional placement entropy: {stat['placement_entropy'] / actionable:.3f}")
+        print("  actionable per-card probabilities:")
+        for card_id in np.argsort(stat["cards"])[::-1]:
+            if stat["cards"][card_id] > 0:
+                print(f"    {entity_names[card_id]:12} {stat['cards'][card_id] / actionable:.3%}")
+    return stats
 
 
 strategy_pool = [
