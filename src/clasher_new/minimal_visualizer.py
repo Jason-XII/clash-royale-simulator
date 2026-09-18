@@ -20,8 +20,8 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-steps = ('15092976',)
-models = [PPO.load(f"cr_logs/cr_{each}_steps.zip", seed=None) for each in steps]
+steps = ('16192544',)
+models = [PPO.load(f"cr_masked_moe_dir/cr_{each}_steps.zip", seed=None) for each in steps]
 
 xlow = 16
 xhigh = 1053
@@ -77,6 +77,8 @@ class Visualizer:
         self.local_player_index = None
         self.running = True
         self.start_time = time.time()
+        self.observation_history = []
+        self.last_observation_ms = None
 
     def draw_arena(self):
         pygame.draw.rect(self.screen, GREEN, (AX,AY,AW,AH))
@@ -93,12 +95,10 @@ class Visualizer:
 
     def draw_entities(self):
         obs = np.zeros((32, 18, 15), dtype=np.float32)
-        non_tower_count = 0
         for entity in list(self.snapshot['entities']):
             if entity['card_id_ac'] == -1 and entity['kind_30'] in (12, 13):
-                name = "KingTower" if entity['kind_30'] else 'King_PrincessTowers'
+                name = "KingTower" if entity['kind_30'] == 13 else 'King_PrincessTowers'
             else:
-                non_tower_count += 1
                 if entity['card_id_ac'] in cards:
                     name = cards[entity['card_id_ac']]
                 elif entity['card_id_ac'] == -1: continue
@@ -123,7 +123,7 @@ class Visualizer:
             card = Card(name)
             entity_id = entity_names.index(name)
             card_type = card_types.index(card.type)
-            player_id = 0  # This way, own troops are always labeled as 0
+            player_id = int(entity['side_78'] != self.local_player_index)
             elixir = card.elixir
             is_air = int(card.is_air_unit)
             attacks_ground, attacks_air = int(card.attack_ground), int(card.attack_air)
@@ -136,8 +136,9 @@ class Visualizer:
             sight_range = card.sight_range / 3
             damage = card.damage / 200
             projectile_damage = card.projectile_data.damage / 200
-            x1, y1 = max(int(x), 17), int(31-y)
-            obs_arr = np.array([entity_id, player_id, elixir, card_type, speed, is_air, attacks_ground, attacks_air,
+            x1 = int(np.clip(x, 0, 17))
+            y1 = int(np.clip(y, 0, 31))
+            obs_arr = np.array([entity_id, card_type, player_id, elixir, speed, is_air, attacks_ground, attacks_air,
                                 hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage,
                                 projectile_damage])
             obs[y1][x1] = obs_arr.copy()
@@ -162,17 +163,39 @@ class Visualizer:
                 hand.append(cards[data_id])
         hand.append(cards[self.snapshot['next_card_data_id_40']])
         hand = np.array([entity_names.index(each) for each in hand], dtype=np.int32)
+
+        snapshot_ms = self.snapshot['t_ms']
+        if not self.observation_history:
+            self.observation_history = [obs.copy() for _ in range(8)]
+            self.last_observation_ms = snapshot_ms
+        elif snapshot_ms - self.last_observation_ms >= 500:
+            self.observation_history.append(obs.copy())
+            self.observation_history = self.observation_history[-8:]
+            self.last_observation_ms = snapshot_ms
+        grid = np.stack(self.observation_history)
+
+        battle_time = self.snapshot['battle_clock_220']
+        if battle_time < 120:
+            phase, time_left = 0, 120 - battle_time
+        elif battle_time < 180:
+            phase, time_left = 1, 180 - battle_time
+        elif battle_time < 240:
+            phase, time_left = 2, 240 - battle_time
+        else:
+            phase, time_left = 3, 300 - battle_time
         final_observation = {
-            'grid': obs,
+            'grid': grid,
             'hand': hand,
-            'elixir': np.array([self.snapshot['own_elixir_1e0']], dtype=np.float32)
+            'elixir': np.array([self.snapshot['own_elixir_1e0']], dtype=np.float32),
+            'phase': phase,
+            'time_till_next_phase': np.array([time_left / 120.0], dtype=np.float32),
         }
-        if time.time() - self.start_time > 1.5 and non_tower_count > 0:
+        if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
             model = random.choice(models)
-            slot, y, x = model.predict(final_observation)[0]
+            slot, y, x = model.predict(final_observation, deterministic=True)[0]
             if slot != 0:
-                card_name = entity_names[hand[slot]]
+                card_name = entity_names[hand[slot - 1]]
                 elixir = Card(card_name).elixir
                 if elixir > self.snapshot['own_elixir_1e0']: return
                 swipe(slot, y, x)

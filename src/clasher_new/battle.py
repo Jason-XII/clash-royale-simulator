@@ -281,10 +281,10 @@ class Troop(Entity):
             super().update(dt)
         # The miner needs to update before deployment.
 
-        if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
-            self.jumping_across_river = False
-            self.data.is_air_unit = Card(self.name).is_air_unit
-            self.speed = self.data.speed
+        # if self.jumping_across_river and self.on_both_sides_of_river(self.start_jumping_position):
+        #     self.jumping_across_river = False
+        #     self.data.is_air_unit = Card(self.name).is_air_unit
+        #     self.speed = self.data.speed
         target = self.battle_state.entities.get(self.target_id)
 
         # I used this weird target selection logic to save time, so target are calculated every 0.1s max instead of every frame
@@ -324,7 +324,22 @@ class Troop(Entity):
                 if dot >= 0:
                     # move towards next waypoint
                     index += 1
-                self.move_towards(self.path[index], dt, True)
+
+                if index == len(self.path):
+                    self.move_towards(current_target.position, dt, True)
+                else:
+                    waypoint = self.path[index]
+                    waypoint_in_river = 17 >= waypoint.y >= 15
+                    distance = waypoint.distance_to(self.position)
+                    if self.jumping_across_river:
+                        if not waypoint_in_river:
+                            if distance < self.speed * dt:
+                                self.jumping_across_river = False
+                                self.data.is_air_unit = False
+                                self.speed = self.data.speed
+                    elif waypoint_in_river:
+                        pass
+                    self.move_towards(waypoint, dt, True)
             self.attack_cooldown = max(self.data.hit_speed-self.data.load_time, self.attack_cooldown-dt*self.speed_buff*self.speed_debuff)
         else:
             if self.attack_cooldown <= 0:
