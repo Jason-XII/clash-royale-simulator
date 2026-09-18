@@ -57,6 +57,8 @@ class CREnv(gym.Env):
         shuffle(player_1_deck)
         if self.opponent_pool:
             self.opponent = random.choice(self.opponent_pool)
+        if callable(getattr(self.opponent, 'reset', None)):
+            self.opponent.reset()
         self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
                        player.PlayerState(1, player_1_deck[:], 5.0))
         if self.visualize:

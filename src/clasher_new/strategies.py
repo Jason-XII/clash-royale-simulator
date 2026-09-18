@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 
 import numpy as np
 
@@ -210,11 +211,114 @@ def counterpush_strategy(observation):
     return (0, 0, 0)
 
 
+def punish_strategy(observation):
+    """Bait predictable bridge pressure into tower-supported defense.
+
+    Wait until attackers reach y=10, deploy melee directly onto them and
+    ranged units behind them, then bank elixir for a supported Giant push.
+    Uses only the observation and the standard eight-card deck.
+    """
+    return defensive_strategy(observation, defend_y=10, min_defend_y=2)
+
+
+class DiverseOpponent:
+    def __init__(self, style):
+        self.style = style
+        self.__name__ = 'randomized_' + style
+        self.parameters = None
+
+    def reset(self):
+        # Separate RNG: action frequency does not change later deck shuffles.
+        rng = random.Random(random.getrandbits(64))
+        self.parameters = dict(
+            depth=rng.choice((8, 9, 10, 11, 12)),
+            gap=rng.choice((2, 3, 4)),
+            offset=rng.choice((-1, 0, 1)),
+            reserve=rng.choice((7, 8, 9)),
+            push_y=rng.choice((6, 8, 10)),
+            spell_count=rng.choice((2, 3)),
+            counter_reserve=rng.choice((5, 6, 7)),
+            lane=rng.choice((3, 14)),
+        )
+        if self.style != 'opposite_lane':
+            # Broad placement jitter weakened tower defense in benchmarks.
+            # Preserve its geometry; vary engagement depth and push timing.
+            self.parameters.update(gap=3, offset=0, reserve=8, push_y=8, spell_count=3)
+            self.parameters['depth'] = min(self.parameters['depth'], 10)
+
+    def __call__(self, observation):
+        if self.parameters is None:
+            self.reset()
+        p = self.parameters
+        view = BattleView.from_observation(observation)
+        names = ENTITY_NAMES
+
+        # Match the established defender's spell rule, with varied selectivity.
+        target, count = view.densest_enemy_group(radius=2.5)
+        if target is not None and count >= p['spell_count']:
+            priority = ('Arrows', 'Fireball') if self.style == 'spell_control' else ('Fireball', 'Arrows')
+            action = view.first_action(priority, *target)
+            if action is not None:
+                return action
+
+        threats = [e for e in view.enemy_troops if e['y'] <= p['depth']]
+        if threats:
+            threat = min(threats, key=lambda e: e['y'])
+            priority = (('Musketeer', 'Archer', 'Minions') if threat['air'] else
+                        ('MiniPekka', 'Knight', 'Musketeer', 'Archer', 'Minions'))
+            for name in priority:
+                y = threat['y'] - p['gap'] if name in ('Musketeer', 'Archer') else threat['y']
+                action = view.action(name, np.clip(y, 2, 14),
+                                     np.clip(threat['x'] + p['offset'], 1, 16))
+                if action is not None:
+                    return action
+            return (0, 0, 0)
+
+        giants = [e for e in view.own_troops if e['id'] == names.index('Giant')]
+        if giants:
+            giant = max(giants, key=lambda e: e['y'])
+            action = view.first_action(('Musketeer', 'Archer', 'Minions'),
+                                       np.clip(giant['y'] - p['gap'], 5, 14), giant['x'])
+            if action is not None:
+                return action
+
+        if self.style == 'counterpush' and not giants:
+            survivors = [e for e in view.own_troops if 8 <= e['y'] <= 17]
+            if survivors and view.elixir >= p['counter_reserve']:
+                front = max(survivors, key=lambda e: e['y'])
+                action = view.action('Giant', min(14, front['y'] + 2), front['x'])
+                if action is not None:
+                    return action
+
+        if view.elixir < p['reserve']:
+            return (0, 0, 0)
+        if self.style == 'opposite_lane':
+            left = sum(e['cost'] * e['hp'] for e in view.enemy_troops if e['x'] < 9)
+            right = sum(e['cost'] * e['hp'] for e in view.enemy_troops if e['x'] >= 9)
+            lane = 14 if left > right else 3 if right > left else p['lane']
+            return view.first_action(('MiniPekka', 'Knight', 'Minions', 'Musketeer', 'Archer'),
+                                     13, lane) or (0, 0, 0)
+        return view.first_action(('Giant', 'Musketeer', 'Archer', 'Minions', 'Knight', 'MiniPekka'),
+                                 p['push_y'], view.lane_x) or (0, 0, 0)
+
+
+def make_diverse_opponents():
+    """New instances per environment or evaluation suite; style lasts one game."""
+    return [DiverseOpponent(style) for style in
+            ('deep_defense', 'counterpush', 'opposite_lane', 'spell_control')]
+
+
+def make_opponent_pool():
+    """Independent stateful opponents for each environment."""
+    return list(STRATEGIES.values()) + make_diverse_opponents()
+
+
 STRATEGIES = {
     "defensive": defensive_strategy,
     "bridge": bridge_pressure_strategy,
     "split": split_lane_strategy,
     "counterpush": counterpush_strategy,
+    "punish": punish_strategy,
 }
 
 
@@ -222,5 +326,9 @@ __all__ = [
     "bridge_pressure_strategy",
     "split_lane_strategy",
     "counterpush_strategy",
+    "punish_strategy",
+    "DiverseOpponent",
+    "make_diverse_opponents",
+    "make_opponent_pool",
     "STRATEGIES",
 ]

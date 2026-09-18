@@ -13,10 +13,7 @@ from torch.distributions import Categorical
 
 from environment import CREnv, entity_names
 from strategies import (
-    bridge_pressure_strategy,
-    counterpush_strategy,
-    defensive_strategy,
-    split_lane_strategy,
+    make_opponent_pool,
 )
 from train import CRFeatureExtractor
 
@@ -291,12 +288,7 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         return actions
 
 
-opponent_pool = [
-    defensive_strategy,
-    bridge_pressure_strategy,
-    split_lane_strategy,
-    counterpush_strategy,
-]
+opponent_pool = make_opponent_pool()
 
 
 def make_env(rank):
@@ -304,8 +296,7 @@ def make_env(rank):
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        return CREnv(opponent_pool=opponent_pool)
-
+        return CREnv(opponent_pool=make_opponent_pool())
     return factory
 
 

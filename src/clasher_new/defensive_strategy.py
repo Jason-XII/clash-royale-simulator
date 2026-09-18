@@ -33,13 +33,16 @@ def _action(hand, name, y, x):
     return slot, int(np.clip(y, 0, 31)), int(np.clip(x, 0, 17))
 
 
-def defensive_strategy(observation):
+def defensive_strategy(observation, *, defend_y=16, min_defend_y=8):
     """Defend the near side, then build a patient Giant counter-push.
 
     ``CREnv.observe`` presents the acting player's arena in a common frame:
     own towers are near ``y=0`` and the opponent approaches from ``y=31``.
     The returned coordinates therefore work for either player through the
     environment's existing coordinate transform.
+
+    ``defend_y`` sets the engagement line; ``min_defend_y`` allows deeper
+    placements when this policy is reused by the tower-defense opponent.
     """
     hand = np.asarray(observation["hand"])
     elixir = float(np.asarray(observation["elixir"])[0])
@@ -102,7 +105,7 @@ def defensive_strategy(observation):
 
     # Answer the deepest intruder with a suitable counter. Ranged defenders
     # stay behind the threat, while melee defenders meet it directly.
-    intruders = [entity for entity in enemy_troops if entity["y"] <= 16]
+    intruders = [entity for entity in enemy_troops if entity["y"] <= defend_y]
     if intruders:
         threat = min(intruders, key=lambda entity: entity["y"])
         priority = (
@@ -114,7 +117,7 @@ def defensive_strategy(observation):
             if name not in available:
                 continue
             target_y = threat["y"] - 3 if name in ("Musketeer", "Archer") else threat["y"]
-            return _action(hand, name, int(np.clip(target_y, 8, 14)), threat["x"])
+            return _action(hand, name, int(np.clip(target_y, min_defend_y, 14)), threat["x"])
         return 0, 0, 0
 
     # Add ranged support behind an existing Giant instead of supporting every
