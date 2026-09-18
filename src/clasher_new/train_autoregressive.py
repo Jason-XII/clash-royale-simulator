@@ -1,4 +1,3 @@
-import os
 import random
 
 import numpy as np
@@ -171,8 +170,7 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
             nn.Linear(latent_dim + card_embedding_dim, hidden_dim),
             nn.Tanh(),
         )
-        self.y_head = nn.Linear(hidden_dim, 32)
-        self.x_head = nn.Linear(hidden_dim, 18)
+        self.placement_head = nn.Linear(hidden_dim, 32 * 18)
 
         cost_table = torch.full((len(entity_names),), float("inf"))
         cost_table[0] = 0.0
@@ -218,35 +216,32 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         selected_card = hand.gather(1, hand_index.unsqueeze(1)).squeeze(1)
         return torch.where(slot == 0, torch.zeros_like(selected_card), selected_card)
 
-    def _placement_distributions(self, latent_pi, selected_card):
+    def _placement_distribution(self, latent_pi, selected_card):
         conditioned = torch.cat(
             (latent_pi, self.card_embedding(selected_card)), dim=1
         )
         placement_latent = self.placement_net(conditioned)
-        y_dist = Categorical(logits=self.y_head(placement_latent))
-        x_dist = Categorical(logits=self.x_head(placement_latent))
-        return y_dist, x_dist
+        return Categorical(logits=self.placement_head(placement_latent))
 
     def _sample_action(self, latent_pi, obs, deterministic=False):
         card_dist, hand = self._card_distribution(latent_pi, obs)
         slot = torch.argmax(card_dist.logits, dim=1) if deterministic else card_dist.sample()
         selected_card = self._selected_card_ids(hand, slot)
-        y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
+        placement_dist = self._placement_distribution(latent_pi, selected_card)
 
         if deterministic:
-            y = torch.argmax(y_dist.logits, dim=1)
-            x = torch.argmax(x_dist.logits, dim=1)
+            tile = torch.argmax(placement_dist.logits, dim=1)
         else:
-            y = y_dist.sample()
-            x = x_dist.sample()
+            tile = placement_dist.sample()
+
+        y = tile // 18
+        x = tile % 18
 
         play_card = slot != 0
         y = torch.where(play_card, y, torch.zeros_like(y))
         x = torch.where(play_card, x, torch.zeros_like(x))
         log_prob = card_dist.log_prob(slot)
-        log_prob = log_prob + play_card.float() * (
-            y_dist.log_prob(y) + x_dist.log_prob(x)
-        )
+        log_prob = log_prob + play_card.float() * placement_dist.log_prob(tile)
         return torch.stack((slot, y, x), dim=1), log_prob
 
     def _conditional_entropy(self, card_dist, hand, obs):
@@ -276,12 +271,11 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         slot, y, x = actions[:, 0], actions[:, 1], actions[:, 2]
         card_dist, hand = self._card_distribution(latent_pi, obs)
         selected_card = self._selected_card_ids(hand, slot)
-        y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
+        placement_dist = self._placement_distribution(latent_pi, selected_card)
+        tile = y * 18 + x
         play_card = slot != 0
         log_prob = card_dist.log_prob(slot)
-        log_prob = log_prob + play_card.float() * (
-            y_dist.log_prob(y) + x_dist.log_prob(x)
-        )
+        log_prob = log_prob + play_card.float() * placement_dist.log_prob(tile)
         entropy = self._conditional_entropy(card_dist, hand, obs)
         return values, log_prob, entropy
 
@@ -317,45 +311,30 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_card_entropy"
-    start_checkpoint = "cr_masked_moe_dir/cr_24694976_steps.zip"
+    model_name = "cr_joint_placement"
     ent_coef = 0.003
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
-    if debug:
-        model = PPO(
-            ContentMaskedAutoregressivePolicy,
-            env,
-            policy_kwargs=policy_kwargs,
-            n_steps=n_steps,
-            batch_size=256,
-            learning_rate=1e-4,
-            n_epochs=4,
-            target_kl=0.03,
-            ent_coef=ent_coef,
-            device="cuda",
-            seed=0,
-            verbose=1,
-            tensorboard_log=f"./{model_name}_dir/",
-        )
-    else:
-        load_checkpoint = model_name if os.path.exists(f"{model_name}.zip") else start_checkpoint
-        model = PPO.load(
-            load_checkpoint,
-            env=env,
-            custom_objects={"policy_class": ContentMaskedAutoregressivePolicy},
-            device="cuda",
-            learning_rate=1e-4,
-            n_epochs=4,
-            target_kl=0.03,
-            ent_coef=ent_coef,
-            tensorboard_log=f"./{model_name}_dir/",
-        )
+    model = PPO(
+        ContentMaskedAutoregressivePolicy,
+        env,
+        policy_kwargs=policy_kwargs,
+        n_steps=n_steps,
+        batch_size=256,
+        learning_rate=1e-4,
+        n_epochs=4,
+        target_kl=0.03,
+        ent_coef=ent_coef,
+        device="cuda",
+        seed=0,
+        verbose=1,
+        tensorboard_log=f"./{model_name}_dir/",
+    )
     callback = CheckpointCallback(
         save_freq=100_000 // n_envs,
         save_path=f"./{model_name}_dir/",
         name_prefix="cr",
     )
     try:
-        model.learn(total_timesteps=5_000_000, reset_num_timesteps=False, callback=callback)
+        model.learn(total_timesteps=5_000_000, callback=callback)
     finally:
         model.save(model_name)
