@@ -249,15 +249,18 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         )
         return torch.stack((slot, y, x), dim=1), log_prob
 
-    def _conditional_entropy(self, latent_pi, card_dist, hand):
-        entropy = card_dist.entropy()
-        for slot in range(1, 5):
-            selected_card = hand[:, slot - 1]
-            y_dist, x_dist = self._placement_distributions(latent_pi, selected_card)
-            entropy = entropy + card_dist.probs[:, slot] * (
-                y_dist.entropy() + x_dist.entropy()
-            )
-        return entropy
+    def _conditional_entropy(self, card_dist, hand, obs):
+        """Card entropy only, conditioned on playing an affordable card."""
+        card_distribution = Categorical(logits=card_dist.logits[:, 1:])
+        entropy = card_distribution.entropy()
+
+        elixir = obs["elixir"].float().reshape(-1, 1)
+        affordable_count = (self.card_cost_table[hand] <= elixir).sum(dim=1)
+        eligible = affordable_count >= 2
+        # PPO averages over the whole batch. Rescale so forced waits and states
+        # with only one legal card do not dilute the exploration bonus.
+        scale = eligible.numel() / eligible.sum().clamp(min=1)
+        return entropy * eligible.float() * scale
 
     def forward(self, obs, deterministic=False):
         latent_pi, latent_vf = self._latents(obs)
@@ -279,7 +282,7 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         log_prob = log_prob + play_card.float() * (
             y_dist.log_prob(y) + x_dist.log_prob(x)
         )
-        entropy = self._conditional_entropy(latent_pi, card_dist, hand)
+        entropy = self._conditional_entropy(card_dist, hand, obs)
         return values, log_prob, entropy
 
     def _predict(self, observation, deterministic=False):
@@ -314,7 +317,7 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_entropy"
+    model_name = "cr_card_entropy"
     start_checkpoint = "cr_masked_moe_dir/cr_24694976_steps.zip"
     ent_coef = 0.003
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
@@ -335,9 +338,11 @@ if __name__ == "__main__":
             tensorboard_log=f"./{model_name}_dir/",
         )
     else:
+        load_checkpoint = model_name if os.path.exists(f"{model_name}.zip") else start_checkpoint
         model = PPO.load(
-            start_checkpoint,
+            load_checkpoint,
             env=env,
+            custom_objects={"policy_class": ContentMaskedAutoregressivePolicy},
             device="cuda",
             learning_rate=1e-4,
             n_epochs=4,
