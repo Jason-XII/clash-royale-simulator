@@ -48,7 +48,7 @@ class CREnv(gym.Env):
         self.visualize = visualize
         self.visualizer = None
 
-        self.history = []
+        self.history = {0: [], 1: []}
         self.fps = 20
 
     def reset(self, *, seed=None, options=None):
@@ -65,8 +65,11 @@ class CREnv(gym.Env):
             from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
-        self.history = []
-        return self.observe(0), {}
+        self.history = {0: [], 1: []}
+        observation = self.observe(0)
+        # Seed both frame stacks from the same initial battle state.
+        self.observe(1)
+        return observation, {}
 
     def opponent_action(self):
         obs1 = self.observe(1)
@@ -175,16 +178,14 @@ class CREnv(gym.Env):
         else:
             phase = 4
             time_left = 300 - battle_time
-        if player_id_observe == 0:
-            # only stack when the player is 0, because I don't need to train using self-play yet.
-            if not self.history:
-                # just initialized, empty
-                self.history = [obs.copy() for _ in range(8)]
-            self.history.append(obs)
-            if len(self.history) > 8:
-                self.history.pop(0)
+        history = self.history[player_id_observe]
+        if not history:
+            history.extend(obs.copy() for _ in range(8))
+        history.append(obs)
+        if len(history) > 8:
+            history.pop(0)
         return {
-            'grid': np.stack(self.history) if player_id_observe == 0 else obs,
+            'grid': np.stack(history),
             'hand': hand,
             'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
             'phase': phase-1,
