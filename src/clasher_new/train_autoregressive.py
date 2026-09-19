@@ -1,3 +1,4 @@
+import os
 import random
 
 import numpy as np
@@ -132,6 +133,8 @@ class AutoregressivePolicy(MultiInputActorCriticPolicy):
 class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
     """Score actual hand cards, mask unaffordable ones, then place the selected card."""
 
+    PLACEMENT_ENTROPY_WEIGHT = 0.25
+
     CARD_COSTS = {
         "Knight": 3,
         "MiniPekka": 4,
@@ -244,18 +247,44 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         log_prob = log_prob + play_card.float() * placement_dist.log_prob(tile)
         return torch.stack((slot, y, x), dim=1), log_prob
 
-    def _conditional_entropy(self, card_dist, hand, obs):
-        """Card entropy only, conditioned on playing an affordable card."""
+    def _conditional_entropy(self, latent_pi, card_dist, hand, obs):
+        """Normalized card entropy plus conditional placement entropy."""
         card_distribution = Categorical(logits=card_dist.logits[:, 1:])
-        entropy = card_distribution.entropy()
-
         elixir = obs["elixir"].float().reshape(-1, 1)
         affordable_count = (self.card_cost_table[hand] <= elixir).sum(dim=1)
-        eligible = affordable_count >= 2
+
+        card_eligible = affordable_count >= 2
         # PPO averages over the whole batch. Rescale so forced waits and states
         # with only one legal card do not dilute the exploration bonus.
-        scale = eligible.numel() / eligible.sum().clamp(min=1)
-        return entropy * eligible.float() * scale
+        card_scale = card_eligible.numel() / card_eligible.sum().clamp(min=1)
+        card_entropy = card_distribution.entropy() / np.log(4)
+        card_entropy = card_entropy * card_eligible.float() * card_scale
+
+        # Compute E[H(tile | card)] under the affordable-card distribution.
+        # Multiplying by P(play) makes this the placement contribution to the
+        # joint policy entropy; forced no-op states contribute nothing.
+        placement_entropy = torch.zeros_like(card_entropy)
+        for slot_index in range(hand.shape[1]):
+            placement_dist = self._placement_distribution(
+                latent_pi, hand[:, slot_index]
+            )
+            placement_entropy = placement_entropy + (
+                card_distribution.probs[:, slot_index] * placement_dist.entropy()
+            )
+
+        placement_eligible = affordable_count >= 1
+        placement_scale = (
+            placement_eligible.numel() / placement_eligible.sum().clamp(min=1)
+        )
+        play_probability = 1.0 - card_dist.probs[:, 0]
+        placement_entropy = placement_entropy / np.log(32 * 18)
+        placement_entropy = (
+            placement_entropy
+            * play_probability
+            * placement_eligible.float()
+            * placement_scale
+        )
+        return card_entropy + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy
 
     def forward(self, obs, deterministic=False):
         latent_pi, latent_vf = self._latents(obs)
@@ -276,7 +305,7 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         play_card = slot != 0
         log_prob = card_dist.log_prob(slot)
         log_prob = log_prob + play_card.float() * placement_dist.log_prob(tile)
-        entropy = self._conditional_entropy(card_dist, hand, obs)
+        entropy = self._conditional_entropy(latent_pi, card_dist, hand, obs)
         return values, log_prob, entropy
 
     def _predict(self, observation, deterministic=False):
@@ -311,30 +340,34 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_joint_placement"
-    ent_coef = 0.003
+    model_name = "cr_joint_entropy"
+    ent_coef = 0.01
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
-    model = PPO(
-        ContentMaskedAutoregressivePolicy,
-        env,
-        policy_kwargs=policy_kwargs,
-        n_steps=n_steps,
-        batch_size=256,
-        learning_rate=1e-4,
-        n_epochs=4,
-        target_kl=0.03,
-        ent_coef=ent_coef,
-        device="cuda",
-        seed=0,
-        verbose=1,
-        tensorboard_log=f"./{model_name}_dir/",
-    )
+    if (not os.path.exists(f'{model_name}.zip')) or debug:
+        model = PPO(
+            ContentMaskedAutoregressivePolicy,
+            env,
+            policy_kwargs=policy_kwargs,
+            n_steps=n_steps,
+            batch_size=256,
+            learning_rate=1e-4,
+            n_epochs=4,
+            target_kl=0.03,
+            ent_coef=ent_coef,
+            device="cuda",
+            seed=0,
+            verbose=1,
+            tensorboard_log=f"./{model_name}_dir/",
+        )
+    else:
+        model = PPO.load(model_name, env=env, device="cuda", learning_rate=1e-4, n_epochs=4, target_kl=0.03,
+                         tensorboard_log=f"./{model_name}_dir/", ent_coef=ent_coef)
     callback = CheckpointCallback(
         save_freq=100_000 // n_envs,
         save_path=f"./{model_name}_dir/",
         name_prefix="cr",
     )
     try:
-        model.learn(total_timesteps=5_000_000, callback=callback)
+        model.learn(total_timesteps=15_000_000, callback=callback)
     finally:
         model.save(model_name)
