@@ -20,8 +20,8 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-steps = ('16192544',)
-models = [PPO.load(f"cr_masked_moe_dir/cr_{each}_steps.zip", seed=None) for each in steps]
+steps = ('2000000',)
+models = [PPO.load(f"cr_imitation/cr_{each}_steps.zip", seed=None) for each in steps]
 
 xlow = 16
 xhigh = 1053
@@ -79,6 +79,96 @@ class Visualizer:
         self.start_time = time.time()
         self.observation_history = []
         self.last_observation_ms = None
+        self.model_index = 0
+        self.model = models[self.model_index]
+        self.model_label = steps[self.model_index]
+        self.tower_info = {}
+        self.score_started = False
+        self.last_score_snapshot_ms = None
+        self.last_score_time = 0.0
+        self.own_area = 0.0
+        self.damage_area = 0.0
+        self.own_integrity = 1.0
+        self.enemy_integrity = 1.0
+        self.own_crowns_lost = 0
+        self.enemy_crowns_lost = 0
+
+    def update_score(self):
+        if not self.snapshot.get('entity_list_valid'):
+            return
+        if self.snapshot['t_ms'] == self.last_score_snapshot_ms:
+            return
+        towers = [
+            e for e in self.snapshot['entities']
+            if e['card_id_ac'] == -1 and e['kind_30'] in (12, 13)
+        ]
+        if not self.score_started:
+            if len(towers) < 6:
+                return
+            self.tower_info = {
+                e['ptr']: (e['side_78'], e['kind_30']) for e in towers
+            }
+            self.score_started = True
+
+        # Known towers that disappear from the entity list remain at zero.
+        ratios = {pointer: 0.0 for pointer in self.tower_info}
+        for entity in towers:
+            pointer = entity['ptr']
+            if pointer in ratios and entity['max_hp_14'] > 0:
+                ratios[pointer] = float(np.clip(
+                    entity['hp_10'] / entity['max_hp_14'], 0.0, 1.0
+                ))
+
+        own = enemy = 0.0
+        own_princess_lost = enemy_princess_lost = 0
+        own_king_lost = enemy_king_lost = False
+        for pointer, (side, kind) in self.tower_info.items():
+            ratio = ratios[pointer]
+            is_own = side == self.local_player_index
+            weight = 0.4 if kind == 13 else 0.3
+            if is_own:
+                own += weight * ratio
+                own_king_lost |= kind == 13 and ratio == 0
+                own_princess_lost += int(kind == 12 and ratio == 0)
+            else:
+                enemy += weight * ratio
+                enemy_king_lost |= kind == 13 and ratio == 0
+                enemy_princess_lost += int(kind == 12 and ratio == 0)
+
+        own = float(np.clip(own, 0.0, 1.0))
+        enemy = float(np.clip(enemy, 0.0, 1.0))
+        battle_time = float(self.snapshot['battle_clock_220'])
+        if self.last_score_snapshot_ms is not None and battle_time >= self.last_score_time:
+            dt = battle_time - self.last_score_time
+            self.own_area += 0.5 * (self.own_integrity + own) * dt
+            self.damage_area += 0.5 * (
+                (1 - self.enemy_integrity) + (1 - enemy)
+            ) * dt
+        self.last_score_snapshot_ms = self.snapshot['t_ms']
+        self.last_score_time = battle_time
+        self.own_integrity = own
+        self.enemy_integrity = enemy
+        self.own_crowns_lost = 3 if own_king_lost else own_princess_lost
+        self.enemy_crowns_lost = 3 if enemy_king_lost else enemy_princess_lost
+
+    def scores(self, final=False):
+        remaining = max(0.0, 300.0 - self.last_score_time)
+        own_future = self.own_integrity
+        enemy_future = self.enemy_integrity
+        if final and self.own_crowns_lost > self.enemy_crowns_lost:
+            own_future = 0.0
+        if final and self.enemy_crowns_lost > self.own_crowns_lost:
+            enemy_future = 0.0
+        defense = 100 * (self.own_area + own_future * remaining) / 300
+        offense = 100 * (self.damage_area + (1 - enemy_future) * remaining) / 300
+        if self.enemy_crowns_lost > self.own_crowns_lost:
+            result, result_score = 'win', 100
+        elif self.enemy_crowns_lost < self.own_crowns_lost:
+            result, result_score = 'loss', 0
+        else:
+            result, result_score = 'draw', 50
+        total = 0.45 * defense + 0.40 * offense + 0.15 * result_score
+        return total, defense, offense, result
 
     def draw_arena(self):
         pygame.draw.rect(self.screen, GREEN, (AX,AY,AW,AH))
@@ -159,9 +249,13 @@ class Visualizer:
         hand = []
         for each in self.snapshot['hand']:
             data_id = each['data_id_40']
-            if data_id in cards:
-                hand.append(cards[data_id])
-        hand.append(cards[self.snapshot['next_card_data_id_40']])
+            if data_id not in cards:
+                return
+            hand.append(cards[data_id])
+        next_card_id = self.snapshot['next_card_data_id_40']
+        if len(hand) != 4 or next_card_id not in cards:
+            return
+        hand.append(cards[next_card_id])
         hand = np.array([entity_names.index(each) for each in hand], dtype=np.int32)
 
         snapshot_ms = self.snapshot['t_ms']
@@ -192,8 +286,7 @@ class Visualizer:
         }
         if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
-            model = random.choice(models)
-            slot, y, x = model.predict(final_observation, deterministic=True)[0]
+            slot, y, x = self.model.predict(final_observation, deterministic=False)[0]
             if slot != 0:
                 card_name = entity_names[hand[slot - 1]]
                 elixir = Card(card_name).elixir
@@ -212,6 +305,14 @@ class Visualizer:
         text = f"t={self.snapshot['battle_clock_220']:.1f}s elixir={self.snapshot['own_elixir_1e0']} hand={hand}"
         txt = self.font.render(text, True, BLACK)
         self.screen.blit(txt, (AX, AY+AH+10))
+        if self.score_started:
+            total, defense, offense, result = self.scores()
+            text = (
+                f"model={self.model_label} total={total:.1f} defense={defense:.1f} "
+                f"offense={offense:.1f} result={result}"
+            )
+            txt = self.font.render(text, True, BLACK)
+            self.screen.blit(txt, (AX, AY+AH+30))
 
     def process_events(self):
         for ev in pygame.event.get():
@@ -231,10 +332,17 @@ class Visualizer:
             self.process_events()
             if self.snapshot and self.local_player_index is not None:
                 if self.snapshot['battle_clock_220'] is not None:
+                    self.update_score()
                     self.render_frame()
+        if self.score_started:
+            total, defense, offense, result = self.scores(final=True)
+            print(
+                f"model={self.model_label} total={total:.2f} "
+                f"defense={defense:.2f} offense={offense:.2f} result={result}"
+            )
         pygame.quit()
 
 window = Visualizer()
-t = Thread(target=mainloop, args=(window, ))
+t = Thread(target=mainloop, args=(window, ), daemon=True)
 t.start()
 window.run()
