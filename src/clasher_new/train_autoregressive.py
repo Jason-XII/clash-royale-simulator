@@ -146,7 +146,8 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         "Giant": 5,
     }
 
-    def __init__(self, observation_space, action_space, lr_schedule, *args, **kwargs):
+    def __init__(self, observation_space, action_space, lr_schedule, *args,
+                 card_embedding_dim=16, hidden_dim=64, **kwargs):
         expected_nvec = np.array([5, 32, 18])
         if not isinstance(action_space, spaces.MultiDiscrete) or not np.array_equal(
             action_space.nvec, expected_nvec
@@ -158,9 +159,6 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         super().__init__(observation_space, action_space, lr_schedule, *args, **kwargs)
 
         latent_dim = self.mlp_extractor.latent_dim_pi
-        card_embedding_dim = 16
-        hidden_dim = 64
-
         self.action_net = nn.Identity()
         self.card_embedding = nn.Embedding(len(entity_names), card_embedding_dim)
         self.card_scorer = nn.Sequential(

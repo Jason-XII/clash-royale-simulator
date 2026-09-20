@@ -16,9 +16,11 @@ import numpy as np
 import os
 
 class CRFeatureExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
+    def __init__(self, observation_space: spaces.Box, features_dim: int = 256,
+                 embedding_dim: int = 8, channels=(32, 64, 64),
+                 normalize_output: bool = False):
         super().__init__(observation_space, features_dim)
-        self.embedding_dim = 8
+        self.embedding_dim = embedding_dim
         self.entity_embedding = nn.Embedding(len(entity_names), self.embedding_dim)
 
         self.num_frames = int(observation_space["grid"].shape[0])
@@ -26,15 +28,16 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         self.in_channels = self.num_frames * self.per_frame_channels
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(self.in_channels, 32, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(32, 64, 3, padding=1, stride=2), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, padding=1, stride=2), nn.ReLU(),
+            nn.Conv2d(self.in_channels, channels[0], 3, padding=1), nn.ReLU(),
+            nn.Conv2d(channels[0], channels[1], 3, padding=1, stride=2), nn.ReLU(),
+            nn.Conv2d(channels[1], channels[2], 3, padding=1, stride=2), nn.ReLU(),
             nn.Flatten(),
         )
         with torch.no_grad():
             dummy = torch.zeros(1, self.in_channels, 32, 18)
             cnn_out = self.cnn(dummy).shape[1]
         self.fc = nn.Linear(cnn_out + 5 * self.embedding_dim + 1 + 4 + 1, features_dim)
+        self.output_norm = nn.LayerNorm(features_dim) if normalize_output else nn.Identity()
 
     def forward(self, observation):
         """
@@ -63,7 +66,18 @@ class CRFeatureExtractor(BaseFeaturesExtractor):
         phase = observation["phase"].float().flatten(1)  # (B, 1)
         time_left = observation["time_till_next_phase"].float()
         combined = torch.cat([grid_feat, hand_feat, elixir.float(), phase, time_left], dim=1)
-        return torch.relu(self.fc(combined))
+        return self.output_norm(torch.relu(self.fc(combined)))
+
+
+class LargeCRFeatureExtractor(CRFeatureExtractor):
+    def __init__(self, observation_space: spaces.Box, features_dim: int = 512):
+        super().__init__(
+            observation_space,
+            features_dim=features_dim,
+            embedding_dim=16,
+            channels=(64, 128, 128),
+            normalize_output=True,
+        )
 
 opponent_pool = [defensive_strategy, bridge_pressure_strategy, split_lane_strategy, counterpush_strategy]
 
