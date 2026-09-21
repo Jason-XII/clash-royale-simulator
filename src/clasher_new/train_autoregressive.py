@@ -1,5 +1,7 @@
 import os
 import random
+from collections import OrderedDict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -15,7 +17,7 @@ from environment import CREnv, entity_names
 from strategies import (
     make_opponent_pool,
 )
-from train import CRFeatureExtractor
+from train import CRFeatureExtractor, SpatialCRFeatureExtractor
 
 
 class AutoregressivePolicy(MultiInputActorCriticPolicy):
@@ -167,11 +169,29 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
             nn.Linear(hidden_dim, 1),
         )
         self.noop_head = nn.Linear(latent_dim, 1)
-        self.placement_net = nn.Sequential(
-            nn.Linear(latent_dim + card_embedding_dim, hidden_dim),
-            nn.Tanh(),
-        )
-        self.placement_head = nn.Linear(hidden_dim, 32 * 18)
+        self.spatial_channels = getattr(self.features_extractor, "spatial_channels", None)
+        if self.spatial_channels is None:
+            self.placement_net = nn.Sequential(
+                nn.Linear(latent_dim + card_embedding_dim, hidden_dim),
+                nn.Tanh(),
+            )
+            self.placement_head = nn.Linear(hidden_dim, 32 * 18)
+        else:
+            self.placement_condition = nn.Linear(
+                latent_dim + card_embedding_dim, 2 * self.spatial_channels
+            )
+            y_coordinates = torch.linspace(-1.0, 1.0, 32).view(1, 1, 32, 1)
+            x_coordinates = torch.linspace(-1.0, 1.0, 18).view(1, 1, 1, 18)
+            coordinates = torch.cat((
+                y_coordinates.expand(1, 1, 32, 18),
+                x_coordinates.expand(1, 1, 32, 18),
+            ), dim=1)
+            self.register_buffer("placement_coordinates", coordinates)
+            self.placement_conv = nn.Sequential(
+                nn.Conv2d(self.spatial_channels + 2, self.spatial_channels, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(self.spatial_channels, 1, 1),
+            )
 
         cost_table = torch.full((len(entity_names),), float("inf"))
         cost_table[0] = 0.0
@@ -221,6 +241,19 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         conditioned = torch.cat(
             (latent_pi, self.card_embedding(selected_card)), dim=1
         )
+        if self.spatial_channels is not None:
+            spatial = self.features_extractor.spatial_features
+            if spatial is None or spatial.shape[0] != latent_pi.shape[0]:
+                raise RuntimeError("spatial features must be encoded before placement")
+            scale, bias = self.placement_condition(conditioned).chunk(2, dim=1)
+            scale = torch.tanh(scale).unsqueeze(-1).unsqueeze(-1)
+            bias = bias.unsqueeze(-1).unsqueeze(-1)
+            placement = spatial * (1.0 + scale) + bias
+            coordinates = self.placement_coordinates.expand(
+                placement.shape[0], -1, -1, -1
+            )
+            placement = torch.cat((placement, coordinates), dim=1)
+            return Categorical(logits=self.placement_conv(placement).flatten(1))
         placement_latent = self.placement_net(conditioned)
         return Categorical(logits=self.placement_head(placement_latent))
 
@@ -312,7 +345,47 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         return actions
 
 
-opponent_pool = make_opponent_pool()
+class HistoricalOpponent:
+    """Sample scripts and frozen checkpoints from this training run."""
+
+    def __init__(self, seed, output_dir, script_fraction=0.6):
+        self.rng = random.Random(seed)
+        self.output_dir = Path(output_dir)
+        self.script_fraction = script_fraction
+        self.scripts = make_opponent_pool()
+        self.models = OrderedDict()
+        self.opponent = self.rng.choice(self.scripts)
+
+    def _checkpoints(self):
+        return sorted(self.output_dir.glob("cr_*_steps.zip"))
+
+    def _load(self, path):
+        key = str(path)
+        if key not in self.models:
+            self.models[key] = PPO.load(key, device="cpu")
+            if len(self.models) > 3:
+                self.models.popitem(last=False)
+        self.models.move_to_end(key)
+        return self.models[key]
+
+    def reset(self):
+        checkpoints = self._checkpoints()
+        if checkpoints and self.rng.random() >= self.script_fraction:
+            self.opponent = self._load(self.rng.choice(checkpoints))
+        else:
+            self.opponent = self.rng.choice(self.scripts)
+        reset = getattr(self.opponent, "reset", None)
+        if callable(reset):
+            reset()
+
+    def __call__(self, observation):
+        if isinstance(self.opponent, PPO):
+            return self.opponent.predict(observation, deterministic=False)[0]
+        return self.opponent(observation)
+
+
+MODEL_NAME = "cr_action_history_spatial"
+OUTPUT_DIR = f"{MODEL_NAME}_dir"
 
 
 def make_env(rank):
@@ -320,14 +393,14 @@ def make_env(rank):
         random.seed(10_000 + rank)
         np.random.seed(10_000 + rank)
         torch.set_num_threads(1)
-        return CREnv(opponent_pool=make_opponent_pool())
+        return CREnv(opponent_model=HistoricalOpponent(10_000 + rank, OUTPUT_DIR))
     return factory
 
 
 if __name__ == "__main__":
     debug = False
     if debug:
-        env = CREnv(opponent_pool=opponent_pool)
+        env = CREnv(opponent_model=HistoricalOpponent(0, OUTPUT_DIR))
         n_envs = 1
         n_steps = 2048
     else:
@@ -338,9 +411,9 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_joint_entropy"
-    ent_coef = 0.01
-    policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
+    model_name = MODEL_NAME
+    ent_coef = 0.00
+    policy_kwargs = {"features_extractor_class": SpatialCRFeatureExtractor}
     if (not os.path.exists(f'{model_name}.zip')) or debug:
         model = PPO(
             ContentMaskedAutoregressivePolicy,

@@ -16,8 +16,8 @@ from strategies import make_opponent_pool
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT = ROOT / "cr_long_horizon_dir"
-START = ROOT / "cr_script_imitation_large_200k.zip"
+OUTPUT = ROOT / "cr_spatial_long_horizon_dir"
+START = ROOT / "cr_script_imitation_spatial_coord_200k.zip"
 
 
 class MixedOpponent:
@@ -26,7 +26,7 @@ class MixedOpponent:
     def __init__(self, seed):
         self.rng = random.Random(seed)
         self.scripts = make_opponent_pool()
-        self.history = [ROOT / "cr_script_imitation_large_200k.zip"]
+        self.history = [START]
         self.models = OrderedDict()
         self.opponent = self.rng.choice(self.scripts)
 
@@ -87,5 +87,5 @@ if __name__ == "__main__":
     try:
         model.learn(15_000_000, callback=callback)
     finally:
-        model.save(ROOT / "cr_long_horizon")
+        model.save(ROOT / "cr_spatial_long_horizon")
         env.close()

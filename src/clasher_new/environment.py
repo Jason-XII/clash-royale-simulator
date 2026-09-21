@@ -30,6 +30,9 @@ speed_types = [0, 0.75, 1.0, 1.5]
 
 
 class CREnv(gym.Env):
+    ACTION_HISTORY_LENGTH = 8
+    ACTION_HISTORY_FEATURES = 6  # card_id, x, y, accepted, played, age
+
     def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0):
         super().__init__()
         self.opponent = opponent_model
@@ -41,7 +44,19 @@ class CREnv(gym.Env):
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "phase": gym.spaces.Discrete(4),
-            "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
+            "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+            "action_history": gym.spaces.Box(
+                low=np.tile(
+                    np.array([0.0, -1.0, -1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                    (self.ACTION_HISTORY_LENGTH, 2, 1),
+                ),
+                high=np.tile(
+                    np.array([len(entity_names) - 1, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+                    (self.ACTION_HISTORY_LENGTH, 2, 1),
+                ),
+                shape=(self.ACTION_HISTORY_LENGTH, 2, self.ACTION_HISTORY_FEATURES),
+                dtype=np.float32,
+            ),
         })
         self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
@@ -49,6 +64,7 @@ class CREnv(gym.Env):
         self.visualizer = None
 
         self.history = {0: [], 1: []}
+        self.action_history = []
         self.fps = 20
 
     def reset(self, *, seed=None, options=None):
@@ -66,10 +82,41 @@ class CREnv(gym.Env):
             self.visualizer = Visualizer(self.battle)
         # Now return initial observation
         self.history = {0: [], 1: []}
+        self.action_history = []
         observation = self.observe(0)
         # Seed both frame stacks from the same initial battle state.
         self.observe(1)
         return observation, {}
+
+    def _record_action(self, player_id, card_name, position, accepted):
+        self.action_history.append({
+            "player": player_id,
+            "card_id": entity_names.index(card_name) if card_name in entity_names else 0,
+            "x": float(position.x) if position is not None else 9.0,
+            "y": float(position.y) if position is not None else 16.0,
+            "accepted": float(accepted),
+            "time": float(self.battle.time),
+        })
+        self.action_history = self.action_history[-2 * self.ACTION_HISTORY_LENGTH:]
+
+    def _encode_action_history(self, player_id):
+        encoded = np.zeros((self.ACTION_HISTORY_LENGTH, 2, self.ACTION_HISTORY_FEATURES), dtype=np.float32)
+        streams = {0: [], 1: []}
+        for event in self.action_history:
+            stream = 0 if event["player"] == player_id else 1
+            streams[stream].append(event)
+        for stream, events in streams.items():
+            for index, event in enumerate(events[-self.ACTION_HISTORY_LENGTH:]):
+                x = np.clip((event["x"] / 17.0) * 2.0 - 1.0, -1.0, 1.0)
+                y = np.clip((event["y"] / 31.0) * 2.0 - 1.0, -1.0, 1.0)
+                if event["player"] != player_id:
+                    x, y = -x, -y
+                encoded[-len(events[-self.ACTION_HISTORY_LENGTH:]) + index, stream] = (
+                    event["card_id"], x, y, event["accepted"],
+                    float(event["card_id"] != 0),
+                    np.clip((self.battle.time - event["time"]) / 4.0, 0.0, 1.0),
+                )
+        return encoded
 
     def opponent_action(self):
         obs1 = self.observe(1)
@@ -78,8 +125,11 @@ class CREnv(gym.Env):
         p1 = self.battle.players[1]
         if slot != 0:
             card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, Position(18-(x+0.5), 32-(y+0.5)))
-            # Yes, this transformation seems weird, but it should be correct
+            position = Position(18-(x+0.5), 32-(y+0.5))
+            accepted = self.battle.deploy_card(1, card_name, position)
+            self._record_action(1, card_name, Position(x+0.5, y+0.5), accepted)
+        else:
+            self._record_action(1, None, None, True)
 
 
     def step(self, action):
@@ -98,9 +148,15 @@ class CREnv(gym.Env):
         red_left = 3-p1.get_crown_count()
 
         slot, y, x = action
+        accepted = True
+        card_name = None
         if slot != 0:
             card_name = p0.cycle[slot-1]
-            self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
+            position = Position(x+0.5, y+0.5)
+            accepted = self.battle.deploy_card(0, card_name, position)
+            self._record_action(0, card_name, position, accepted)
+        else:
+            self._record_action(0, None, None, True)
 
         self.opponent_action()
         # only make decisions per half second
@@ -125,7 +181,10 @@ class CREnv(gym.Env):
                 reward += 10
             else:
                 reward -= 10
-        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
+        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
+            "accepted": accepted,
+            "card_name": card_name,
+        }
 
 
     def observe(self, player_id_observe=0):
@@ -189,7 +248,8 @@ class CREnv(gym.Env):
             'hand': hand,
             'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
             'phase': phase-1,
-            'time_till_next_phase': np.array([time_left/120.0], dtype=np.float32)
+            'time_till_next_phase': np.array([time_left/120.0], dtype=np.float32),
+            'action_history': self._encode_action_history(player_id_observe),
         }
 
 
