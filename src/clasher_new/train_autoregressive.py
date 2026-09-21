@@ -237,7 +237,7 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         selected_card = hand.gather(1, hand_index.unsqueeze(1)).squeeze(1)
         return torch.where(slot == 0, torch.zeros_like(selected_card), selected_card)
 
-    def _placement_distribution(self, latent_pi, selected_card):
+    def _placement_distribution(self, latent_pi, selected_card, placement_mask=None):
         conditioned = torch.cat(
             (latent_pi, self.card_embedding(selected_card)), dim=1
         )
@@ -253,15 +253,26 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
                 placement.shape[0], -1, -1, -1
             )
             placement = torch.cat((placement, coordinates), dim=1)
-            return Categorical(logits=self.placement_conv(placement).flatten(1))
-        placement_latent = self.placement_net(conditioned)
-        return Categorical(logits=self.placement_head(placement_latent))
+            logits = self.placement_conv(placement).flatten(1)
+        else:
+            placement_latent = self.placement_net(conditioned)
+            logits = self.placement_head(placement_latent)
+        if placement_mask is not None:
+            flat_mask = placement_mask.reshape(placement_mask.shape[0], -1).bool()
+            flat_mask = flat_mask | ~flat_mask.any(dim=1, keepdim=True)
+            logits = logits.masked_fill(~flat_mask, -1e9)
+        return Categorical(logits=logits)
 
     def _sample_action(self, latent_pi, obs, deterministic=False):
         card_dist, hand = self._card_distribution(latent_pi, obs)
         slot = torch.argmax(card_dist.logits, dim=1) if deterministic else card_dist.sample()
         selected_card = self._selected_card_ids(hand, slot)
-        placement_dist = self._placement_distribution(latent_pi, selected_card)
+        placement_mask = obs["placement_mask"].gather(
+            1, slot[:, None, None, None].expand(-1, 1, 32, 18)
+        ).squeeze(1)
+        placement_dist = self._placement_distribution(
+            latent_pi, selected_card, placement_mask
+        )
 
         if deterministic:
             tile = torch.argmax(placement_dist.logits, dim=1)
@@ -297,7 +308,9 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         placement_entropy = torch.zeros_like(card_entropy)
         for slot_index in range(hand.shape[1]):
             placement_dist = self._placement_distribution(
-                latent_pi, hand[:, slot_index]
+                latent_pi,
+                hand[:, slot_index],
+                obs["placement_mask"][:, slot_index + 1],
             )
             placement_entropy = placement_entropy + (
                 card_distribution.probs[:, slot_index] * placement_dist.entropy()
@@ -331,7 +344,12 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         slot, y, x = actions[:, 0], actions[:, 1], actions[:, 2]
         card_dist, hand = self._card_distribution(latent_pi, obs)
         selected_card = self._selected_card_ids(hand, slot)
-        placement_dist = self._placement_distribution(latent_pi, selected_card)
+        placement_mask = obs["placement_mask"].gather(
+            1, slot[:, None, None, None].expand(-1, 1, 32, 18)
+        ).squeeze(1)
+        placement_dist = self._placement_distribution(
+            latent_pi, selected_card, placement_mask
+        )
         tile = y * 18 + x
         play_card = slot != 0
         log_prob = card_dist.log_prob(slot)
@@ -384,7 +402,7 @@ class HistoricalOpponent:
         return self.opponent(observation)
 
 
-MODEL_NAME = "cr_action_history_spatial"
+MODEL_NAME = "cr_spatial_masked"
 OUTPUT_DIR = f"{MODEL_NAME}_dir"
 
 
@@ -412,7 +430,7 @@ if __name__ == "__main__":
         n_steps = 8192 // n_envs
 
     model_name = MODEL_NAME
-    ent_coef = 0.00
+    ent_coef = 0.005
     policy_kwargs = {"features_extractor_class": SpatialCRFeatureExtractor}
     if (not os.path.exists(f'{model_name}.zip')) or debug:
         model = PPO(

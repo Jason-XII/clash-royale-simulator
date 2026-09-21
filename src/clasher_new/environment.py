@@ -57,6 +57,9 @@ class CREnv(gym.Env):
                 shape=(self.ACTION_HISTORY_LENGTH, 2, self.ACTION_HISTORY_FEATURES),
                 dtype=np.float32,
             ),
+            "placement_mask": gym.spaces.Box(
+                low=0.0, high=1.0, shape=(5, 32, 18), dtype=np.float32,
+            ),
         })
         self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
 
@@ -187,6 +190,42 @@ class CREnv(gym.Env):
         }
 
 
+    def _placement_mask(self, player_id):
+        mask = np.zeros((5, 32, 18), dtype=np.float32)
+        mask[0] = 1.0  # no-op has a canonical placement
+        state = self.battle.players[player_id]
+        for slot, card_name in enumerate(state.cycle[:4], start=1):
+            if not state.can_play_card(card_name):
+                continue
+            card = battle.Card(card_name)
+            for y in range(32):
+                for x in range(18):
+                    position = Position(x + 0.5, y + 0.5)
+                    valid = True
+                    if card.type != "spell":
+                        if self.battle.is_position_occupied_by_building(position, 0):
+                            valid = False
+                        elif player_id == 0:
+                            if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0):
+                                valid = False
+                            elif position.y >= 21.0:
+                                valid = False
+                            elif position.y >= 15.0:
+                                tower_hp = state.right_tower_hp if position.x > 9 else state.left_tower_hp
+                                if tower_hp > 0:
+                                    valid = False
+                        else:
+                            if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0):
+                                valid = False
+                            elif position.y <= 10.0:
+                                valid = False
+                            elif position.y <= 17.0:
+                                tower_hp = state.right_tower_hp if position.x > 9 else state.left_tower_hp
+                                if tower_hp > 0:
+                                    valid = False
+                    mask[slot, y, x] = float(valid)
+        return mask
+
     def observe(self, player_id_observe=0):
         """Gives a representation of game state"""
         obs = np.zeros((32, 18, 15), dtype=np.float32)
@@ -250,6 +289,7 @@ class CREnv(gym.Env):
             'phase': phase-1,
             'time_till_next_phase': np.array([time_left/120.0], dtype=np.float32),
             'action_history': self._encode_action_history(player_id_observe),
+            'placement_mask': self._placement_mask(player_id_observe),
         }
 
 
