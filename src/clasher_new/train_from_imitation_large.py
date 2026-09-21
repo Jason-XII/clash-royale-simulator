@@ -1,4 +1,4 @@
-"""PPO fine-tuning with varied opponents and full-action rehearsal."""
+"""Long-horizon PPO initialized from the large imitation policy."""
 
 from collections import OrderedDict
 from pathlib import Path
@@ -8,7 +8,7 @@ import re
 import numpy as np
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 from environment import CREnv
@@ -16,20 +16,17 @@ from strategies import make_opponent_pool
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT = ROOT / "cr_selfplay_rehearsal_dir"
+OUTPUT = ROOT / "cr_long_horizon_dir"
 START = ROOT / "cr_script_imitation_large_200k.zip"
 
 
 class MixedOpponent:
-    """50% scripts, 30% historical policies, 20% latest policy snapshot."""
+    """50% scripts, 30% imitation policy, 20% latest policy snapshot."""
 
     def __init__(self, seed):
         self.rng = random.Random(seed)
         self.scripts = make_opponent_pool()
-        self.history = [
-            ROOT / "cr_script_imitation_large_200k.zip",
-            ROOT / "cr_selfplay_large_dir" / "cr_1000000_steps.zip",
-        ]
+        self.history = [ROOT / "cr_script_imitation_large_200k.zip"]
         self.models = OrderedDict()
         self.opponent = self.rng.choice(self.scripts)
 
@@ -70,53 +67,6 @@ def make_env(rank):
     return factory
 
 
-class ActionRehearsal(BaseCallback):
-    """Four full demonstrated-action updates before each PPO rollout."""
-
-    def __init__(self, batches=4, batch_size=128):
-        super().__init__()
-        shards = sorted((ROOT / "script_imitation_data_200k").rglob("*.npz"))
-        rng = np.random.default_rng(0)
-        rng.shuffle(shards)
-        self.shards = shards[max(1, round(0.1 * len(shards))):]
-        self.batches = batches
-        self.batch_size = batch_size
-
-    def _on_rollout_start(self):
-        losses = []
-        for _ in range(self.batches):
-            with np.load(random.choice(self.shards)) as data:
-                indices = np.random.choice(len(data["action"]), self.batch_size)
-                obs = {
-                    "grid": data["grid"][indices], "hand": data["hand"][indices],
-                    "elixir": data["elixir"][indices], "phase": data["phase"][indices],
-                    "time_till_next_phase": data["time"][indices],
-                }
-                action = torch.as_tensor(
-                    data["action"][indices], device=self.model.device, dtype=torch.long
-                )
-            obs, _ = self.model.policy.obs_to_tensor(obs)
-            latent, _ = self.model.policy._latents(obs)
-            card_dist, hand = self.model.policy._card_distribution(latent, obs)
-            slot = action[:, 0]
-            loss = -card_dist.log_prob(slot).mean()
-            play = slot != 0
-            if play.any():
-                selected = self.model.policy._selected_card_ids(hand, slot)
-                placement = self.model.policy._placement_distribution(latent, selected)
-                loss -= placement.log_prob(action[:, 1] * 18 + action[:, 2])[play].mean()
-            optimizer = self.model.policy.optimizer
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.policy.parameters(), 0.5)
-            optimizer.step()
-            losses.append(loss.item())
-        self.logger.record("train/action_rehearsal_loss", np.mean(losses))
-
-    def _on_step(self):
-        return True
-
-
 if __name__ == "__main__":
     n_envs = 16
     OUTPUT.mkdir(exist_ok=True)
@@ -124,18 +74,18 @@ if __name__ == "__main__":
     model = PPO.load(
         START, env=env, device="auto",
         n_steps=8192 // n_envs, batch_size=256, learning_rate=1e-4,
-        n_epochs=4, target_kl=0.03, ent_coef=0.01,
+        n_epochs=4, gamma=0.997, gae_lambda=0.98,
+        target_kl=0.03, ent_coef=0.01,
         tensorboard_log=str(OUTPUT),
     )
     model.policy.optimizer = model.policy.optimizer_class(
         model.policy.parameters(), lr=1e-4, **model.policy.optimizer_kwargs
     )
-    callbacks = [
-        ActionRehearsal(),
-        CheckpointCallback(100_000 // n_envs, str(OUTPUT), name_prefix="cr"),
-    ]
+    callback = CheckpointCallback(
+        100_000 // n_envs, str(OUTPUT), name_prefix="cr"
+    )
     try:
-        model.learn(15_000_000, callback=callbacks)
+        model.learn(15_000_000, callback=callback)
     finally:
-        model.save(ROOT / "cr_selfplay_large")
+        model.save(ROOT / "cr_long_horizon")
         env.close()
