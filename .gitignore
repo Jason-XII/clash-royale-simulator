@@ -1,6 +1,6 @@
 ideas/
 *.DS_store
-src/clahser_new/cr_logs/
+/src/clasher_new/cr_*/
 .idea/
 *.xml
 *.iml
