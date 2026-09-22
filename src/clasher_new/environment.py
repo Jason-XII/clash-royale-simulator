@@ -194,13 +194,17 @@ class CREnv(gym.Env):
         mask = np.zeros((5, 32, 18), dtype=np.float32)
         mask[0] = 1.0  # no-op has a canonical placement
         state = self.battle.players[player_id]
+        enemy = self.battle.players[1 - player_id]
         for slot, card_name in enumerate(state.cycle[:4], start=1):
             if not state.can_play_card(card_name):
                 continue
             card = battle.Card(card_name)
             for y in range(32):
                 for x in range(18):
-                    position = Position(x + 0.5, y + 0.5)
+                    local_position = Position(x + 0.5, y + 0.5)
+                    position = local_position if player_id == 0 else Position(
+                        18.0 - local_position.x, 32.0 - local_position.y
+                    )
                     valid = True
                     if card.type != "spell":
                         if self.battle.is_position_occupied_by_building(position, 0):
@@ -211,7 +215,7 @@ class CREnv(gym.Env):
                             elif position.y >= 21.0:
                                 valid = False
                             elif position.y >= 15.0:
-                                tower_hp = state.right_tower_hp if position.x > 9 else state.left_tower_hp
+                                tower_hp = enemy.right_tower_hp if position.x > 9 else enemy.left_tower_hp
                                 if tower_hp > 0:
                                     valid = False
                         else:
@@ -220,7 +224,7 @@ class CREnv(gym.Env):
                             elif position.y <= 10.0:
                                 valid = False
                             elif position.y <= 17.0:
-                                tower_hp = state.right_tower_hp if position.x > 9 else state.left_tower_hp
+                                tower_hp = enemy.right_tower_hp if position.x > 9 else enemy.left_tower_hp
                                 if tower_hp > 0:
                                     valid = False
                     mask[slot, y, x] = float(valid)

@@ -62,7 +62,9 @@ client_side/client.py
 RL environment and training code:
 ```plaintext
 environment.py
-train.py
+policy.py
+train_rl.py
+evaluate.py
 ```
 
 ## Simulator Features

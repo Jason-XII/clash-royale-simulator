@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from pathlib import Path
+from stable_baselines3 import PPO
 from dataclasses import dataclass
 import random
 
@@ -332,3 +335,42 @@ __all__ = [
     "make_opponent_pool",
     "STRATEGIES",
 ]
+
+
+class HistoricalOpponent:
+    """Sample scripts and frozen checkpoints from this training run."""
+
+    def __init__(self, seed, output_dir, script_fraction=0.6):
+        self.rng = random.Random(seed)
+        self.output_dir = Path(output_dir)
+        self.script_fraction = script_fraction
+        self.scripts = make_opponent_pool()
+        self.models = OrderedDict()
+        self.opponent = self.rng.choice(self.scripts)
+
+    def _checkpoints(self):
+        return sorted(self.output_dir.glob("cr_*_steps.zip"))
+
+    def _load(self, path):
+        key = str(path)
+        if key not in self.models:
+            self.models[key] = PPO.load(key, device="cpu")
+            if len(self.models) > 3:
+                self.models.popitem(last=False)
+        self.models.move_to_end(key)
+        return self.models[key]
+
+    def reset(self):
+        checkpoints = self._checkpoints()
+        if checkpoints and self.rng.random() >= self.script_fraction:
+            self.opponent = self._load(self.rng.choice(checkpoints))
+        else:
+            self.opponent = self.rng.choice(self.scripts)
+        reset = getattr(self.opponent, "reset", None)
+        if callable(reset):
+            reset()
+
+    def __call__(self, observation):
+        if isinstance(self.opponent, PPO):
+            return self.opponent.predict(observation, deterministic=False)[0]
+        return self.opponent(observation)
