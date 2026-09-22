@@ -2,7 +2,6 @@ import battle, player
 from core import Position
 
 import gymnasium as gym
-from random import randint
 import time
 import numpy as np
 import random
@@ -15,8 +14,6 @@ player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireba
 b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
                        player.PlayerState(1, player_1_deck, 10))
 
-deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
-
 entity_names = ['None', 'Knight', 'MiniPekka', 'Arrows', 'Minions', 'Archer',
                 'Musketeer', 'Fireball', 'Giant', 'King_PrincessTowers',
                 'KingTower', 'ArrowsSpell', 'FireballSpell']
@@ -26,26 +23,15 @@ entity_names = ['None', 'Knight', 'MiniPekka', 'Arrows', 'Minions', 'Archer',
 card_types = ['troop', 'character', 'spell', 'building']
 # Troop mean princess tower, short for tower troop.
 # Actual troops are represented as "characters".
-speed_types = [0, 0.75, 1.0, 1.5]
-
 
 class CREnv(gym.Env):
     ACTION_HISTORY_LENGTH = 8
     ACTION_HISTORY_FEATURES = 6  # card_id, x, y, accepted, played, age
 
     def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0,
-                 reward_mode="potential", gamma=0.997, shaping_scale=1.0,
-                 start_elixir=(5.0, 5.0)):
+                 reward_mode="potential", gamma=0.997, shaping_scale=1.0):
         super().__init__()
-        if reward_mode not in ("legacy", "potential"):
-            raise ValueError("reward_mode must be legacy or potential")
-        if not 0 <= gamma <= 1 or not np.isfinite(shaping_scale) or shaping_scale < 0:
-            raise ValueError("gamma must be in [0, 1]; shaping_scale must be finite and nonnegative")
         self.reward_mode, self.gamma, self.shaping_scale = reward_mode, gamma, shaping_scale
-        low, high = (float(start_elixir[0]), float(start_elixir[1]))
-        if not 0 <= low <= high <= 10:
-            raise ValueError("start_elixir must satisfy 0 <= min <= max <= 10")
-        self.start_elixir = (low, high)
         self.opponent = opponent_model
         self.opponent_pool = opponent_pool
         self.battle: battle.BattleState = None
@@ -83,14 +69,14 @@ class CREnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        decks = [self.np_random.permutation(sorted(deck)).tolist() for deck in (player_0_deck, player_1_deck)]
+        random.shuffle(player_0_deck)
+        random.shuffle(player_1_deck)
         if self.opponent_pool:
             self.opponent = random.choice(self.opponent_pool)
-        if callable(getattr(self.opponent, 'reset', None)):
-            self.opponent.reset()
-        elixir = [float(self.np_random.uniform(*self.start_elixir)) for _ in range(2)]
-        self.battle = battle.BattleState(player.PlayerState(0, decks[0], elixir[0]),
-                       player.PlayerState(1, decks[1], elixir[1]))
+        if callable(getattr(self.opponent, 'reset', None)): self.opponent.reset()
+        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck, 5.0),
+                       player.PlayerState(1, player_1_deck, 5.0))
+
         self.initial_hp = np.maximum(self._reward_state()[0].sum(axis=1), 1.0)
         if self.visualize:
             from new_visualization import Visualizer
