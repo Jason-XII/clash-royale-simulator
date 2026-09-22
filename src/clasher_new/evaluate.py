@@ -12,11 +12,20 @@ from stable_baselines3 import PPO
 from tqdm import tqdm
 
 
+def reward_options(model):
+    """Old metadata-less checkpoints used the legacy reward; never silently relabel it."""
+    config = getattr(model, "run_metadata", {}).get("config", {})
+    return dict(reward_mode=config.get("reward_mode", "legacy"), gamma=model.gamma,
+                shaping_scale=config.get("shaping_scale", 1.0))
+
+
 def evaluate_checkpoint(checkpoint, strategy_pool, games=20, seed=0, deterministic=True, visualize=False):
     """Evaluate one checkpoint and report behavior as well as win rate."""
     from environment import CREnv
 
     model = PPO.load(checkpoint, device="auto")
+    options = reward_options(model)
+    print(f"Reward settings: {options}; compare win rates, not rewards across objectives.")
     results = {}
     total_decisions = 0
     total_noops = 0
@@ -28,7 +37,7 @@ def evaluate_checkpoint(checkpoint, strategy_pool, games=20, seed=0, determinist
         # Reset RNGs for every opponent and checkpoint to make comparisons fair.
         random.seed(seed)
         np.random.seed(seed)
-        env = CREnv(opponent_model=strategy, visualize=visualize)
+        env = CREnv(opponent_model=strategy, visualize=visualize, **options)
         wins = 0
         rewards = []
         lengths = []
@@ -80,6 +89,7 @@ def evaluate_checkpoint(checkpoint, strategy_pool, games=20, seed=0, determinist
             "wins": wins,
             "games": games,
             "mean_reward": float(np.mean(rewards)),
+            "reward_settings": options,
             "mean_length": float(np.mean(lengths)),
             "noop_rate": noops / decisions,
             "deployment_success_rate": successes / attempts if attempts else 0.0,
@@ -157,7 +167,7 @@ def compare_policy_entropy(checkpoints, strategy_pool, games=3, seed=0, determin
     for strategy in strategy_pool:
         random.seed(seed)
         np.random.seed(seed)
-        env = CREnv(opponent_model=strategy, visualize=visualize)
+        env = CREnv(opponent_model=strategy, visualize=visualize, **reward_options(collector))
         try:
             for _ in tqdm(range(games), desc=strategy.__name__, leave=False):
                 observation, _ = env.reset()

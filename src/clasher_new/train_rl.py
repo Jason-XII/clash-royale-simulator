@@ -42,8 +42,10 @@ class RunConfig:
     batch_size: int = 256
     learning_rate: float = 1e-4
     n_epochs: int = 4
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
+    gamma: float = 0.997
+    gae_lambda: float = 0.98
+    reward_mode: str = "potential"
+    shaping_scale: float = 1.0
     ent_coef: float = 0.001
     entropy_samples: int = 256
     clip_range: float = 0.2
@@ -66,11 +68,13 @@ class RunConfig:
         for key in ("learning_rate", "clip_range", "max_grad_norm", "target_kl"):
             if not np.isfinite(getattr(self, key)) or getattr(self, key) <= 0:
                 raise ValueError(f"{key} must be finite and positive")
-        for key in ("ent_coef", "vf_coef"):
+        for key in ("ent_coef", "vf_coef", "shaping_scale"):
             if not np.isfinite(getattr(self, key)) or getattr(self, key) < 0:
                 raise ValueError(f"{key} must be finite and nonnegative")
         if not 0 <= self.seed < 2**32 - 10_000 - self.n_envs:
             raise ValueError("seed must fit the NumPy seed range, including worker offsets")
+        if self.reward_mode not in ("legacy", "potential"):
+            raise ValueError("reward_mode must be legacy or potential")
 
 
 def file_hashes():
@@ -112,6 +116,11 @@ def make_manifest(config, env, initialized_from=None):
         "observation_space": describe_space(env.observation_space),
         "action_space": describe_space(env.action_space),
         "entropy": {"objective": "joint_action_entropy", "units": "nats", "wait_actions": 1},
+        "reward": {"mode": config.reward_mode, "outcome": {"win": 10, "loss": -10},
+                   "potential": "0.5 * (own_hp_fraction - enemy_hp_fraction + crown_balance / 3)",
+                   "shaping": "scale * (gamma * Phi(next) - Phi(current)); terminal Phi = 0",
+                   "legacy": "5 * crown_delta + 0.001 * enemy_damage - 0.0012 * own_damage",
+                   "decision_seconds": 0.5},
         "opponents": {"type": "HistoricalOpponent", "pool": "make_opponent_pool",
                       "directory": "checkpoints", "sampling": "uniform_history",
                       "script_fraction": config.script_fraction},
@@ -136,7 +145,7 @@ def make_env(rank, config, checkpoint_dir):
         torch.set_num_threads(1)
         return CREnv(opponent_model=HistoricalOpponent(
             worker_seed, checkpoint_dir, script_fraction=config.script_fraction,
-        ))
+        ), reward_mode=config.reward_mode, gamma=config.gamma, shaping_scale=config.shaping_scale)
     return factory
 
 
@@ -164,18 +173,31 @@ class RunCheckpoints(BaseCallback):
 
 
 class ExplorationMetrics(BaseCallback):
-    """Measure the collecting policy on a bounded sample of each rollout."""
+    """Record rollout rewards and bounded-sample policy diagnostics."""
 
     def __init__(self, samples=256):
         super().__init__()
         self.samples = samples
 
+    def _on_rollout_start(self):
+        self.reward_steps = self.shaping_abs = self.completed_games = self.wins = 0
+
     def _on_step(self):
+        for info, done in zip(self.locals["infos"], self.locals["dones"]):
+            self.reward_steps += 1
+            self.shaping_abs += abs(info["reward_shaping"])
+            if done:
+                self.completed_games += 1
+                self.wins += info["reward_outcome"] > 0
         return True
 
     def _on_rollout_end(self):
         from environment import entity_names
 
+        self.logger.record("reward/mean_abs_shaping", self.shaping_abs / self.reward_steps)
+        self.logger.record("reward/completed_games", self.completed_games)
+        if self.completed_games:
+            self.logger.record("reward/training_win_rate", self.wins / self.completed_games)
         buffer = self.model.rollout_buffer
         count = buffer.buffer_size * buffer.n_envs
         # Evenly spaced indices avoid changing the training RNG streams.
@@ -222,7 +244,8 @@ def build_model(config, env, device, log_dir, init_from=None):
     from policy import SpatialEncoder, ClashPolicy
 
     options = {key: value for key, value in asdict(config).items()
-               if key not in ("n_envs", "script_fraction", "checkpoint_every", "entropy_samples")}
+               if key not in ("n_envs", "script_fraction", "checkpoint_every", "entropy_samples",
+                              "reward_mode", "shaping_scale")}
     options.update(device=device, tensorboard_log=str(log_dir), verbose=1,
                    policy_kwargs={"features_extractor_class": SpatialEncoder})
     if init_from is None:

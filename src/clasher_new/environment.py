@@ -33,8 +33,14 @@ class CREnv(gym.Env):
     ACTION_HISTORY_LENGTH = 8
     ACTION_HISTORY_FEATURES = 6  # card_id, x, y, accepted, played, age
 
-    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0):
+    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0,
+                 reward_mode="potential", gamma=0.997, shaping_scale=1.0):
         super().__init__()
+        if reward_mode not in ("legacy", "potential"):
+            raise ValueError("reward_mode must be legacy or potential")
+        if not 0 <= gamma <= 1 or not np.isfinite(shaping_scale) or shaping_scale < 0:
+            raise ValueError("gamma must be in [0, 1]; shaping_scale must be finite and nonnegative")
+        self.reward_mode, self.gamma, self.shaping_scale = reward_mode, gamma, shaping_scale
         self.opponent = opponent_model
         self.opponent_pool = opponent_pool
         self.battle: battle.BattleState = None
@@ -80,6 +86,7 @@ class CREnv(gym.Env):
             self.opponent.reset()
         self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
                        player.PlayerState(1, player_1_deck[:], 5.0))
+        self.initial_hp = np.maximum(self._reward_state()[0].sum(axis=1), 1.0)
         if self.visualize:
             from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
@@ -139,16 +146,13 @@ class CREnv(gym.Env):
         """
         The action is a tuple with three values: (slot, y, x). When slot=0, no action is performed. Else deploy card on
         slot to the corresponding position on the arena.
-        A decision is made every 30 frames (which is half a second). The reward is calculated by the damage dealt/taken,
-        destroyed tower/lost tower and won game/lose game.
+        At speed=1, a decision advances 10 frames (half a second).
+        Reward is the configured outcome/shaping objective.
         The opponent is a function that takes in the observation and outputs the action tuple.
         """
 
-        p0, p1 = self.battle.players
-        blue_hps_old = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
-        red_hps_old = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
-        blue_left = 3-p0.get_crown_count()
-        red_left = 3-p1.get_crown_count()
+        p0 = self.battle.players[0]
+        before = self._reward_state()
 
         slot, y, x = action
         accepted = True
@@ -171,23 +175,36 @@ class CREnv(gym.Env):
             if self.visualizer:
                 self.visualizer.render_frame()
                 time.sleep(1/self.fps)
-        blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
-        red_hps_new = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
-        blue_left_new = 3-p0.get_crown_count()
-        red_left_new = 3-p1.get_crown_count()
-
-        reward = 5*(red_left-red_left_new)-5*(blue_left-blue_left_new)+0.001*(red_hps_old-red_hps_new)-0.0012*(blue_hps_old-blue_hps_new)
-        if self.battle.game_over:
-            #print('Battle over.', self.battle.winner, reward, p0.king_tower_hp, p0.left_tower_hp, p0.right_tower_hp,
-            #      p1.king_tower_hp, p1.left_tower_hp, p1.right_tower_hp)
-            if self.battle.winner == 0:
-                reward += 10
-            else:
-                reward -= 10
-        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
+        outcome, shaping = self._reward_components(before, self._reward_state())
+        # King destruction, sudden death, and the game's tiebreak all terminate.
+        return self.observe(0), outcome + shaping, self.battle.game_over, False, {
             "accepted": accepted,
             "card_name": card_name,
+            "reward_outcome": outcome,
+            "reward_shaping": shaping,
         }
+
+    def _reward_state(self):
+        return (np.array([(p.king_tower_hp, p.left_tower_hp, p.right_tower_hp)
+                          for p in self.battle.players], dtype=np.float64),
+                np.array([p.get_crown_count() for p in self.battle.players]))
+
+    def _potential(self, state):
+        hp, lost = state
+        health = np.clip(np.maximum(hp, 0).sum(axis=1) / self.initial_hp, 0, 1)
+        return float(0.5 * (health[0] - health[1] + (lost[1] - lost[0]) / 3))
+
+    def _reward_components(self, before, after):
+        outcome = (10.0 if self.battle.winner == 0 else -10.0) if self.battle.game_over else 0.0
+        if self.reward_mode == "legacy":
+            damage = (before[0] - after[0]).sum(axis=1)
+            lost = after[1] - before[1]
+            shaping = 5 * (lost[1] - lost[0]) + 0.001 * damage[1] - 0.0012 * damage[0]
+        else:
+            # Terminal Phi MUST be zero, including time-based game endings.
+            following = 0.0 if self.battle.game_over else self._potential(after)
+            shaping = self.shaping_scale * (self.gamma * following - self._potential(before))
+        return outcome, float(shaping)
 
 
     def _placement_mask(self, player_id):
