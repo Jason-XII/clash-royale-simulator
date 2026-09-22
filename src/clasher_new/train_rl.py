@@ -53,6 +53,10 @@ class RunConfig:
     max_grad_norm: float = 0.5
     target_kl: float = 0.03
     script_fraction: float = 0.6
+    opponent_spread: float = 0.25
+    scatter_opponent: bool = False
+    start_elixir_min: float = 5.0
+    start_elixir_max: float = 5.0
     checkpoint_every: int = 100_000
 
     def validate(self):
@@ -62,9 +66,11 @@ class RunConfig:
         rollout_size = self.n_envs * self.n_steps
         if self.batch_size < 2 or rollout_size < 2 or rollout_size % self.batch_size:
             raise ValueError("rollout size must be divisible by batch_size, both >= 2")
-        for key in ("gamma", "gae_lambda", "script_fraction"):
+        for key in ("gamma", "gae_lambda", "script_fraction", "opponent_spread"):
             if not 0 <= getattr(self, key) <= 1:
                 raise ValueError(f"{key} must be between 0 and 1")
+        if not 0 <= self.start_elixir_min <= self.start_elixir_max <= 10:
+            raise ValueError("start_elixir must satisfy 0 <= min <= max <= 10")
         for key in ("learning_rate", "clip_range", "max_grad_norm", "target_kl"):
             if not np.isfinite(getattr(self, key)) or getattr(self, key) <= 0:
                 raise ValueError(f"{key} must be finite and positive")
@@ -123,7 +129,11 @@ def make_manifest(config, env, initialized_from=None):
                    "decision_seconds": 0.5},
         "opponents": {"type": "HistoricalOpponent", "pool": "make_opponent_pool",
                       "directory": "checkpoints", "sampling": "uniform_history",
-                      "script_fraction": config.script_fraction},
+                      "script_fraction": config.script_fraction,
+                      "spread": config.opponent_spread,
+                      "scatter_opponent": config.scatter_opponent},
+        "start_elixir": {"min": config.start_elixir_min, "max": config.start_elixir_max,
+                         "sampling": "uniform_per_player_per_episode"},
         "files": file_hashes(),
         "git": git_revision(),
         "packages": {name: version(name) for name in
@@ -145,7 +155,10 @@ def make_env(rank, config, checkpoint_dir):
         torch.set_num_threads(1)
         return CREnv(opponent_model=HistoricalOpponent(
             worker_seed, checkpoint_dir, script_fraction=config.script_fraction,
-        ), reward_mode=config.reward_mode, gamma=config.gamma, shaping_scale=config.shaping_scale)
+            opponent_spread=config.opponent_spread,
+            scatter_opponent=config.scatter_opponent,
+        ), reward_mode=config.reward_mode, gamma=config.gamma, shaping_scale=config.shaping_scale,
+           start_elixir=(config.start_elixir_min, config.start_elixir_max))
     return factory
 
 
@@ -233,7 +246,7 @@ class ExplorationMetrics(BaseCallback):
             matches = stats["hand"] == entity_names.index(name)
             probability = (stats["slot_probabilities"][:, 1:] * matches).sum(axis=1)
             self.logger.record(f"exploration/card_probability/{name}", float(probability.mean()))
-            eligible = matches & stats["affordable"]
+            eligible = matches & stats["playable"]
             self.logger.record(f"exploration/available_samples/{name}", int(eligible.sum()))
             if eligible.any():
                 self.logger.record(f"exploration/placement_entropy/{name}",
@@ -245,7 +258,8 @@ def build_model(config, env, device, log_dir, init_from=None):
 
     options = {key: value for key, value in asdict(config).items()
                if key not in ("n_envs", "script_fraction", "checkpoint_every", "entropy_samples",
-                              "reward_mode", "shaping_scale")}
+                              "reward_mode", "shaping_scale",
+                              "opponent_spread", "scatter_opponent", "start_elixir_min", "start_elixir_max")}
     options.update(device=device, tensorboard_log=str(log_dir), verbose=1,
                    policy_kwargs={"features_extractor_class": SpatialEncoder})
     if init_from is None:
@@ -272,8 +286,14 @@ def parse_args(argv=None):
     parser.add_argument("--total-timesteps", type=int, default=15_000_000,
                         help="additional steps; rounded up to full PPO rollouts")
     for key, default in asdict(RunConfig()).items():
-        parser.add_argument("--" + key.replace("_", "-"), type=type(default),
-                            default=None, help=f"new-run default: {default}")
+        flag = "--" + key.replace("_", "-")
+        if isinstance(default, bool):
+            # type=bool would turn "--flag False" into True; expose --flag/--no-flag.
+            parser.add_argument(flag, action=argparse.BooleanOptionalAction,
+                                default=None, help=f"new-run default: {default}")
+        else:
+            parser.add_argument(flag, type=type(default),
+                                default=None, help=f"new-run default: {default}")
     args = parser.parse_args(argv)
     if args.total_timesteps <= 0:
         parser.error("--total-timesteps must be positive")

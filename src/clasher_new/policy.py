@@ -74,7 +74,7 @@ class SpatialEncoder(BaseFeaturesExtractor):
 
 
 class ClashPolicy(MultiInputActorCriticPolicy):
-    """Score actual hand cards, mask unaffordable ones, then place the selected card."""
+    """Score hand cards with legal placements, then place the selected card."""
 
     CARD_COSTS = {
         "Knight": 3,
@@ -134,6 +134,8 @@ class ClashPolicy(MultiInputActorCriticPolicy):
         cost_table[0] = 0.0
         for card_name, cost in self.CARD_COSTS.items():
             cost_table[entity_names.index(card_name)] = float(cost)
+        # Retain this buffer for checkpoint compatibility; legality comes from
+        # the simulator's masks, not a second calculation using rounded elixir.
         self.register_buffer("card_cost_table", cost_table)
 
         # The parent created its optimizer before these new heads existed.
@@ -144,6 +146,10 @@ class ClashPolicy(MultiInputActorCriticPolicy):
     def _latents(self, obs):
         return self.mlp_extractor(self.extract_features(obs))
 
+    @staticmethod
+    def _playable_slots(obs):
+        return obs["placement_mask"][:, 1:].flatten(2).bool().any(dim=-1)
+
     def _card_distribution(self, latent_pi, obs):
         hand = obs["hand"][:, :4].long()
         card_vectors = self.card_embedding(hand)
@@ -152,10 +158,7 @@ class ClashPolicy(MultiInputActorCriticPolicy):
             torch.cat((state, card_vectors), dim=2)
         ).squeeze(2)
 
-        elixir = obs["elixir"].float().reshape(-1, 1)
-        costs = self.card_cost_table[hand]
-        affordable = costs <= elixir
-        card_scores = card_scores.masked_fill(~affordable, -1e9)
+        card_scores = card_scores.masked_fill(~self._playable_slots(obs), -1e9)
 
         noop_score = self.noop_head(latent_pi)
         logits = torch.cat((noop_score, card_scores), dim=1)
@@ -183,8 +186,10 @@ class ClashPolicy(MultiInputActorCriticPolicy):
         )
         placement = torch.cat((placement, coordinates), dim=1)
         logits = self.placement_conv(placement).flatten(1)
-        flat_mask = placement_mask.reshape(placement_mask.shape[0], -1).bool()
-        flat_mask = flat_mask | ~flat_mask.any(dim=1, keepdim=True)
+        flat_mask = placement_mask.reshape(placement_mask.shape[0], -1).bool().clone()
+        # Unplayable slots have zero card probability, but entropy evaluates
+        # every slot. Give only those empty branches one zero-entropy placeholder.
+        flat_mask[:, 0] |= ~flat_mask.any(dim=1)
         logits = logits.masked_fill(~flat_mask, -1e9)
         return Categorical(logits=logits)
 
@@ -239,8 +244,8 @@ class ClashPolicy(MultiInputActorCriticPolicy):
         latent_pi, _ = self._latents(obs)
         card_dist, hand = self._card_distribution(latent_pi, obs)
         placement_entropies = self._placement_entropies(latent_pi, hand, obs)
-        affordable = self.card_cost_table[hand] <= obs["elixir"].reshape(-1, 1)
-        actionable = affordable.any(dim=1)
+        playable = self._playable_slots(obs)
+        actionable = playable.any(dim=1)
         # Normalize logits directly, even when P(play) is extremely small.
         played_card_dist = Categorical(logits=card_dist.logits[:, 1:])
         wait_play_dist = Categorical(logits=torch.stack((
@@ -249,7 +254,7 @@ class ClashPolicy(MultiInputActorCriticPolicy):
         slot_entropy = card_dist.entropy()
         return {
             "hand": hand,
-            "affordable": affordable,
+            "playable": playable,
             "actionable": actionable,
             "slot_probabilities": card_dist.probs,
             "wait_probability": card_dist.probs[:, 0],
