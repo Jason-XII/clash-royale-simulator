@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from pathlib import Path
+from stable_baselines3 import PPO
 from dataclasses import dataclass
 import random
 
@@ -302,15 +305,130 @@ class DiverseOpponent:
                                  p['push_y'], view.lane_x) or (0, 0, 0)
 
 
+class LaneSpread:
+    """Per-episode lane columns that preserve an opponent's left/right intent.
+
+    ``spread=0`` reproduces the original geometry exactly (columns 3 and 14).
+    ``spread=1`` samples each column uniformly across its half of the arena.
+    Depth is jittered around the opponent's intended engagement line.
+    """
+
+    def __init__(self, spread, rng):
+        spread = min(max(float(spread), 0.0), 1.0)
+        low = int(np.clip(round(3 - 2 * spread), 1, 8))
+        high = int(np.clip(round(3 + 5 * spread), low, 8))
+        self.left = rng.randint(low, high)
+        low = int(np.clip(round(14 - 5 * spread), 9, 16))
+        high = int(np.clip(round(14 + 2 * spread), low, 16))
+        self.right = rng.randint(low, high)
+        self.depth = int(round(3 * spread))
+
+    def remap(self, y, x, rng):
+        column = self.left if x < 9 else self.right
+        depth = y
+        if self.depth:
+            depth += rng.randint(-self.depth, self.depth)
+        return depth, column
+
+
+class SpreadOpponent:
+    """Widen an opponent's deployment geometry while preserving its tactics.
+
+    The wrapped opponent still decides *what* to play and which half of the
+    arena to play it in; this wrapper moves the placement to the episode's
+    committed column and jitters its depth. Every remapped action is checked
+    against the legal placement mask, so an illegal deployment is impossible.
+
+    This deliberately trades opponent strength for geometric diversity. An
+    earlier attempt at blanket jitter was reverted because it weakened tower
+    defence; committing to one column per episode keeps pushes coherent while
+    still spreading the training distribution across the arena.
+    """
+
+    def __init__(self, inner, spread=1.0):
+        self.inner = inner
+        self.spread = float(spread)
+        self.__name__ = getattr(inner, "__name__", "opponent") + "_spread"
+        self._geometry = None
+        self._rng = random.Random(random.getrandbits(64))
+
+    def reset(self):
+        reset = getattr(self.inner, "reset", None)
+        if callable(reset):
+            reset()
+        self._rng = random.Random(random.getrandbits(64))
+        self._geometry = LaneSpread(self.spread, self._rng)
+
+    def __call__(self, observation):
+        if self._geometry is None:
+            self.reset()
+        action = self.inner(observation)
+        slot, y, x = (int(value) for value in np.asarray(action).reshape(-1)[:3])
+        if slot == 0:
+            return slot, y, x
+        depth, column = self._geometry.remap(y, x, self._rng)
+        mask = np.asarray(observation["placement_mask"])
+        if (0 <= depth < mask.shape[1] and 0 <= column < mask.shape[2]
+                and slot < mask.shape[0] and mask[slot, depth, column]):
+            return slot, depth, column
+        if 0 <= y < mask.shape[1] and 0 <= x < mask.shape[2] and mask[slot, y, x]:
+            return slot, y, x
+        # The wrapped opponent proposed an illegal tile. Keep its card choice
+        # but pick a legal tile, so training never sees a wasted deployment;
+        # an unplayable card becomes a wait instead.
+        tiles = np.argwhere(mask[slot] > 0)
+        if not len(tiles):
+            return 0, 0, 0
+        legal_y, legal_x = tiles[self._rng.randrange(len(tiles))]
+        return slot, int(legal_y), int(legal_x)
+
+
+class ScatterOpponent:
+    """Uniformly random legal deployments; maximises geometric diversity."""
+
+    def __init__(self, wait_probability=0.3):
+        self.__name__ = "scatter"
+        self.wait_probability = float(wait_probability)
+        self._rng = random.Random(random.getrandbits(64))
+
+    def reset(self):
+        self._rng = random.Random(random.getrandbits(64))
+
+    def __call__(self, observation):
+        mask = np.asarray(observation["placement_mask"])
+        playable = [slot for slot in range(1, 5) if mask[slot].any()]
+        if not playable or self._rng.random() < self.wait_probability:
+            return 0, 0, 0
+        slot = self._rng.choice(playable)
+        tiles = np.argwhere(mask[slot] > 0)
+        y, x = tiles[self._rng.randrange(len(tiles))]
+        return slot, int(y), int(x)
+
+
 def make_diverse_opponents():
     """New instances per environment or evaluation suite; style lasts one game."""
     return [DiverseOpponent(style) for style in
             ('deep_defense', 'counterpush', 'opposite_lane', 'spell_control')]
 
 
-def make_opponent_pool():
-    """Independent stateful opponents for each environment."""
-    return list(STRATEGIES.values()) + make_diverse_opponents()
+def make_opponent_pool(spread=0.0, include_scatter=True):
+    """Independent stateful opponents for each environment.
+
+    ``spread=0`` is the historical nine-opponent pool, whose deployments occupy
+    only 22 of the 576 tiles. A larger value remaps placements across the arena,
+    so a policy that reuses a few tiles stops being a sufficient best response.
+
+    ``include_scatter`` adds a uniformly random legal placer. It maximises
+    geometric coverage but is much easier to beat than the scripts, so it is
+    separable when measuring the strength cost of broadening.
+    """
+    scripts = list(STRATEGIES.values()) + make_diverse_opponents()
+    if spread <= 0:
+        return scripts
+    pool = [SpreadOpponent(script, spread=spread) for script in scripts]
+    if include_scatter:
+        pool.append(ScatterOpponent())
+    return pool
 
 
 STRATEGIES = {
@@ -328,7 +446,53 @@ __all__ = [
     "counterpush_strategy",
     "punish_strategy",
     "DiverseOpponent",
+    "LaneSpread",
+    "SpreadOpponent",
+    "ScatterOpponent",
     "make_diverse_opponents",
     "make_opponent_pool",
     "STRATEGIES",
 ]
+
+
+class HistoricalOpponent:
+    """Sample scripts and frozen checkpoints from this training run."""
+
+    def __init__(self, seed, output_dir, script_fraction=0.6, opponent_spread=0.0,
+                 scatter_opponent=False):
+        self.rng = random.Random(seed)
+        self.output_dir = Path(output_dir)
+        self.script_fraction = script_fraction
+        self.opponent_spread = float(opponent_spread)
+        self.scatter_opponent = bool(scatter_opponent)
+        self.scripts = make_opponent_pool(spread=self.opponent_spread,
+                                          include_scatter=self.scatter_opponent)
+        self.models = OrderedDict()
+        self.opponent = self.rng.choice(self.scripts)
+
+    def _checkpoints(self):
+        return sorted(self.output_dir.glob("cr_*_steps.zip"))
+
+    def _load(self, path):
+        key = str(path)
+        if key not in self.models:
+            self.models[key] = PPO.load(key, device="cpu")
+            if len(self.models) > 3:
+                self.models.popitem(last=False)
+        self.models.move_to_end(key)
+        return self.models[key]
+
+    def reset(self):
+        checkpoints = self._checkpoints()
+        if checkpoints and self.rng.random() >= self.script_fraction:
+            self.opponent = self._load(self.rng.choice(checkpoints))
+        else:
+            self.opponent = self.rng.choice(self.scripts)
+        reset = getattr(self.opponent, "reset", None)
+        if callable(reset):
+            reset()
+
+    def __call__(self, observation):
+        if isinstance(self.opponent, PPO):
+            return self.opponent.predict(observation, deterministic=False)[0]
+        return self.opponent(observation)

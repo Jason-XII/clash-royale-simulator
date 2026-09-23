@@ -64,7 +64,9 @@ client_side/client.py
 RL环境和训练代码：
 ```plaintext
 environment.py
-train.py
+policy.py
+train_rl.py
+evaluate.py
 ```
 
 ## 模拟器特性
