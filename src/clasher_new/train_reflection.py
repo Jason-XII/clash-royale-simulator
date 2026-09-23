@@ -20,7 +20,7 @@ from train_counter import CounterMixture, COUNTER_FRACTION
 
 CHECKPOINT = Path("cr_decision_dir/cr_5200000_steps.zip")
 RUN_DIR = Path("cr_reflection")
-ADDITIONAL_STEPS = 1_000_000
+ADDITIONAL_STEPS = 10_000_000
 SEED = 0
 N_ENVS = 16
 
