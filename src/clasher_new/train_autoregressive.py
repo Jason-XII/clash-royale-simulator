@@ -340,7 +340,7 @@ if __name__ == "__main__":
         env = VecMonitor(env)
         n_steps = 8192 // n_envs
 
-    model_name = "cr_joint_entropy"
+    model_name = "cr_decision"
     ent_coef = 0.005
     policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
     if (not os.path.exists(f'{model_name}.zip')) or debug:
