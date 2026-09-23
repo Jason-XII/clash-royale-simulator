@@ -84,7 +84,7 @@ def main():
         }, indent=2) + "\n")
         callback = CheckpointCallback(
             save_freq=max(100_000 // N_ENVS, 1),
-            save_path=str(RUN_DIR / "checkpoints"), name_prefix="cr",
+            save_path=str(RUN_DIR), name_prefix="cr",
         )
         try:
             # False retains the 4M counter; total_timesteps is ADDITIONAL work.
