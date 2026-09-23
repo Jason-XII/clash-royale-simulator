@@ -18,9 +18,9 @@ from strategies import DiverseOpponent, make_opponent_pool
 
 
 CHECKPOINT = Path("cr_decision_dir/cr_4000000_steps.zip")
-RUN_DIR = Path("cr_counter_4m_seed0")
+RUN_DIR = Path("cr_counter")
 COUNTER_FRACTION = 0.20
-ADDITIONAL_STEPS = 1_000_000
+ADDITIONAL_STEPS = 2_000_000
 SEED = 0
 N_ENVS = 16
 
