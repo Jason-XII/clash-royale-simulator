@@ -83,10 +83,20 @@ class CREnv(gym.Env):
 
 
     def step(self, action):
+        observation, reward, terminated, truncated, info = self._step_once(action)
+        p0 = self.battle.players[0]
+        while not (terminated or truncated) and not any(
+            p0.can_play_card(card) for card in p0.cycle[:4]
+        ):
+            observation, next_reward, terminated, truncated, _ = self._step_once((0, 0, 0))
+            reward += next_reward
+        return observation, reward, terminated, truncated, info
+
+    def _step_once(self, action):
         """
         The action is a tuple with three values: (slot, y, x). When slot=0, no action is performed. Else deploy card on
         slot to the corresponding position on the arena.
-        A decision is made every 30 frames (which is half a second). The reward is calculated by the damage dealt/taken,
+        Advance half a second. The reward is calculated by the damage dealt/taken,
         destroyed tower/lost tower and won game/lose game.
         The opponent is a function that takes in the observation and outputs the action tuple.
         """
