@@ -15,7 +15,7 @@ from train_spatial import make_env as base_env
 
 
 CHECKPOINT = Path("cr_spatial_scratch/cr_6500000_steps.zip")
-ADDITIONAL_STEPS = 1_000_000
+ADDITIONAL_STEPS = 5_000_000
 N_ENVS = 16
 
 
@@ -30,7 +30,7 @@ def main(control=False, seed=0, run_dir=None):
     if not CHECKPOINT.is_file():
         raise FileNotFoundError(f"Missing {CHECKPOINT}; run from src/clasher_new.")
     arm = "control" if control else "legal"
-    run_dir = Path(run_dir or f"cr_spatial_{arm}_seed{seed}")
+    run_dir = Path(run_dir or f"cr_spatial_{arm}")
     run_dir.mkdir(parents=True, exist_ok=False)
     env = VecMonitor(SubprocVecEnv(
         [make_env(rank, seed, control) for rank in range(N_ENVS)], start_method="spawn"
