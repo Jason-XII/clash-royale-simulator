@@ -667,25 +667,8 @@ class BattleState:
             return False
         card_info = Card(card_name)
 
-        if card_info.type != 'spell':
-            # Check the deployment area is legit
-            if self.is_position_occupied_by_building(position, 0): return False
-            if player_id == 0:
-                if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0): return False
-                if position.y >= 21.0: return False
-                elif position.y >= 15.0:
-                    if position.x <= 9:
-                        if self.players[1].left_tower_hp > 0: return False
-                    else:
-                        if self.players[1].right_tower_hp > 0: return False
-            elif player_id == 1:
-                if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0): return False
-                if position.y <= 10: return False
-                elif position.y <= 17.0:
-                    if position.x <= 9:
-                        if self.players[0].left_tower_hp > 0: return False
-                    else:
-                        if self.players[0].right_tower_hp > 0: return False
+        if card_info.type != 'spell' and not self.can_place_troop(player_id, position):
+            return False
 
         if card_info.type == 'spell' and card_info.projectiles:
             initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
@@ -707,6 +690,27 @@ class BattleState:
             self.delayed_spawn((len(self.entities)+1, p, player_id, card_name, self), delayed_counter)
             delayed_counter += card_info.spawn_delay
         self.players[player_id].play_card(card_name)
+        return True
+
+    def can_place_troop(self, player_id, position):
+        """Deployment-area rule shared by the simulator and action mask."""
+        if self.is_position_occupied_by_building(position, 0): return False
+        if player_id == 0:
+            if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0): return False
+            if position.y >= 21.0: return False
+            if position.y >= 15.0:
+                if position.x <= 9:
+                    if self.players[1].left_tower_hp > 0: return False
+                else:
+                    if self.players[1].right_tower_hp > 0: return False
+        elif player_id == 1:
+            if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0): return False
+            if position.y <= 10: return False
+            if position.y <= 17.0:
+                if position.x <= 9:
+                    if self.players[0].left_tower_hp > 0: return False
+                else:
+                    if self.players[0].right_tower_hp > 0: return False
         return True
 
     def calculate_building_cache(self):
@@ -776,5 +780,4 @@ class BattleState:
             elif attack_ground and not entity.data.is_air_unit:
                 if entity.position.distance_to(position) < range:
                     entity.take_damage(amount_dealt)
-
 
