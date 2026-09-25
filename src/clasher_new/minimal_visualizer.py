@@ -25,7 +25,7 @@ W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
 steps = ('selfplay-10.4M',)
-models = [PPO.load("cr_spatial_scratch/selfplay/cr_10400000_steps.zip", device="cpu")]
+models = [PPO.load("cr_sniper/cr_14100000_steps.zip", device="cpu")]
 
 # Static legal-deploy tiles for the local player (own-half zones; fences & tower tiles
 # excluded). The live client has no simulator battle, so we approximate legality with the

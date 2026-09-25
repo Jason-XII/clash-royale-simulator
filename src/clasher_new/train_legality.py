@@ -6,11 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 from masked_spatial import LegalPlacement, MaskedSpatialPolicy
+from parallel_rollout import ParallelPPO, ParallelVecEnv
 from train_spatial import make_env as base_env
 
 
@@ -40,16 +39,16 @@ def main(control=False, seed=0, run_dir=None, checkpoint=CHECKPOINT,
     arm = arm_name or ("control" if control else "legal")
     run_dir = Path(run_dir or f"cr_spatial_{arm}")
     run_dir.mkdir(parents=True, exist_ok=False)
-    env = VecMonitor(SubprocVecEnv(
+    env = ParallelVecEnv(
         [make_env(rank, seed, control, opponent_factory) for rank in range(N_ENVS)],
-        start_method="spawn"
-    ), filename=str(run_dir / "monitor.csv"))
+        monitor=run_dir / "monitor.csv",
+    )
     try:
         changes = None if control else {
             "observation_space": env.observation_space,
             "policy_class": MaskedSpatialPolicy,
         }
-        model = PPO.load(checkpoint, env=env, device="auto",
+        model = ParallelPPO.load(checkpoint, env=env, device="auto",
                          custom_objects=changes,
                          tensorboard_log=str(run_dir / "tensorboard"))
         model.set_random_seed(seed)
@@ -58,6 +57,7 @@ def main(control=False, seed=0, run_dir=None, checkpoint=CHECKPOINT,
             "initial_steps": int(model.num_timesteps),
             "additional_steps": additional_steps, "seed": seed, "n_envs": N_ENVS,
             "policy": type(model.policy).__name__,
+            "collector": "parallel_rollout",
         }
         if experiment_info:
             experiment.update(experiment_info)

@@ -65,9 +65,8 @@ def main():
     sys.path.insert(0, str(source))
     import torch
     import stable_baselines3
-    from stable_baselines3 import PPO
+    from parallel_rollout import ParallelPPO, ParallelVecEnv
     from stable_baselines3.common.logger import configure
-    from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
     from masked_spatial import MaskedSpatialPolicy
     torch.set_num_threads(1)
 
@@ -92,10 +91,12 @@ def main():
             family = expanded
         return sum(table[pid][1] for pid in family if pid in table)
 
-    class TimedPPO(PPO):
+    class TimedPPO(ParallelPPO):
         def synchronize(self):
             if self.device.type == "cuda":
                 torch.cuda.synchronize(self.device)
+            elif self.device.type == "mps":
+                torch.mps.synchronize()
 
         def collect_rollouts(self, *a, **kw):
             self.synchronize()
@@ -105,6 +106,7 @@ def main():
             result = super().collect_rollouts(*a, **kw)
             self.synchronize()
             self.collected = time.perf_counter()
+            self.cpu_collected = cpu_seconds()
             return result
 
         def train(self):
@@ -115,6 +117,7 @@ def main():
             row = dict(steps=self.num_timesteps - self.steps_started,
                        seconds=elapsed, rollout_seconds=self.collected - self.started,
                        update_seconds=ended - self.collected,
+                       rollout_cpu_cores=(self.cpu_collected - self.cpu_started) / (self.collected - self.started),
                        average_cpu_cores=(cpu_seconds() - self.cpu_started) / elapsed,
                        ppo_updates=int(self._n_updates))
             self.samples.append(row)
@@ -131,18 +134,19 @@ def main():
                   allocated_cpus=allocated, torch=torch.__version__, sb3=stable_baselines3.__version__,
                   gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
                   checkpoint=str(target), checkpoint_sha256=digest.hexdigest(),
+                  collector="parallel_rollout",
                   source_sha256={name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-                                 for name in ("train_sniper.py", "environment.py", "battle.py", "masked_spatial.py")},
+                                 for name in ("train_sniper.py", "environment.py", "battle.py", "masked_spatial.py", "parallel_rollout.py")},
                   arguments={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}, runs=[])
     print(f"Allocated CPUs: {allocated}; workers: {counts}; results: {output}", flush=True)
     for repeat in range(args.repeats):
         for count in counts:
             print(f"Workers={count}, repeat={repeat+1}", flush=True)
             started = time.perf_counter()
-            env = VecMonitor(SubprocVecEnv([
+            env = ParallelVecEnv([
                 worker(str(source), str(target), rank, args.seed + repeat)
                 for rank in range(count)
-            ], start_method="spawn"))
+            ])
             try:
                 custom = dict(observation_space=env.observation_space, policy_class=MaskedSpatialPolicy)
                 if args.n_steps is not None:
