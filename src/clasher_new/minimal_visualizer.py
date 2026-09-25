@@ -13,6 +13,10 @@ import random
 
 from stable_baselines3 import PPO
 
+import masked_spatial  # registers MaskedSpatialPolicy so PPO.load can unpickle it
+from arena import TileGrid as _TileGrid
+from core import Position as _Pos
+
 pygame.init()
 TILE = 22
 AX, AY = 50, 50
@@ -20,8 +24,25 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-steps = ('2000000',)
-models = [PPO.load(f"cr_imitation/cr_{each}_steps.zip", seed=None) for each in steps]
+steps = ('selfplay-10.4M',)
+models = [PPO.load("cr_spatial_scratch/selfplay/cr_10400000_steps.zip", device="cpu")]
+
+# Static legal-deploy tiles for the local player (own-half zones; fences & tower tiles
+# excluded). The live client has no simulator battle, so we approximate legality with the
+# arena rules; the real client still enforces true legality on each swipe.
+_GRID = _TileGrid()
+_TROOP_TILES = np.array(
+    [[_GRID.can_deploy_at(_Pos(x + 0.5, y + 0.5), 0, None, False) for x in range(18)]
+     for y in range(32)], dtype=np.int8)
+
+
+def build_legal_mask(hand_names, own_elixir):
+    mask = np.zeros((4, 32, 18), dtype=np.int8)
+    for slot, name in enumerate(hand_names[:4]):
+        c = Card(name)
+        if c.elixir <= own_elixir:
+            mask[slot] = 1 if c.type == "spell" else _TROOP_TILES
+    return mask
 
 xlow = 16
 xhigh = 1053
@@ -256,6 +277,7 @@ class Visualizer:
         if len(hand) != 4 or next_card_id not in cards:
             return
         hand.append(cards[next_card_id])
+        hand_names = list(hand)
         hand = np.array([entity_names.index(each) for each in hand], dtype=np.int32)
 
         snapshot_ms = self.snapshot['t_ms']
@@ -284,6 +306,8 @@ class Visualizer:
             'phase': phase,
             'time_till_next_phase': np.array([time_left / 120.0], dtype=np.float32),
         }
+        final_observation['legal_mask'] = build_legal_mask(
+            hand_names, self.snapshot['own_elixir_1e0'])
         if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
             slot, y, x = self.model.predict(final_observation, deterministic=False)[0]
