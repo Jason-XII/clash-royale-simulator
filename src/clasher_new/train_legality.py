@@ -23,7 +23,10 @@ def make_env(rank, seed, control, opponent_factory=None):
     def factory():
         env = base_env(rank, seed)()
         if opponent_factory is not None:
-            env.unwrapped.opponent = opponent_factory()
+            opponent = opponent_factory()
+            env.unwrapped.opponent = opponent
+            if callable(getattr(opponent, "bind_env", None)):
+                opponent.bind_env(env.unwrapped)
         return env if control else LegalPlacement(env)
     return factory
 
