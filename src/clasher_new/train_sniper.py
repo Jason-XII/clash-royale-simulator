@@ -34,6 +34,8 @@ class FrozenTarget:
     def __call__(self, observation):
         battle = self.env.battle
         player = battle.players[1]
+        if not any(player.can_play_card(card) for card in player.cycle[:4]):
+            return 0, 0, 0
         mask = np.zeros((4, 32, 18), dtype=np.int8)
         playable = [player.can_play_card(card) for card in player.cycle[:4]]
         if any(playable):
