@@ -21,8 +21,8 @@ TARGET = HERE / "cr_spatial_scratch/selfplay/cr_11100000_steps.zip"
 class FrozenTarget:
     """Sample the frozen target with exact player-1 legality."""
 
-    def __init__(self):
-        self.model = PPO.load(TARGET, device="cpu")
+    def __init__(self, checkpoint=TARGET):
+        self.model = PPO.load(checkpoint, device="cpu")
         self.env = None
 
     def bind_env(self, env):
