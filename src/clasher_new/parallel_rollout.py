@@ -48,6 +48,13 @@ class SharedBuffer(DictRolloutBuffer):
         attach(self, self.descriptors, self.rank)
         self.pos, self.full, self.generator_ready = 0, False, False
 
+    def compute_returns_and_advantage(self, last_values, dones):
+        shared_returns = self.returns
+        super().compute_returns_and_advantage(last_values, dones)
+        # SB3 rebinds returns to a new array; publish it back to shared storage.
+        np.copyto(shared_returns, self.returns)
+        self.returns = shared_returns
+
 
 class Events(BaseCallback):
     def _on_step(self):
@@ -198,6 +205,10 @@ class ParallelPPO(PPO):
             raise RuntimeError('Mixed policy versions in rollout')
         rollout_buffer.observations = {}
         attach(rollout_buffer, env.descriptors)
+        expected_returns = rollout_buffer.advantages + rollout_buffer.values
+        if not (np.isfinite(expected_returns).all() and
+                np.allclose(rollout_buffer.returns, expected_returns, rtol=1e-5, atol=1e-6)):
+            raise RuntimeError('Invalid shared value targets; refusing to update the policy')
         rollout_buffer.pos, rollout_buffer.full, rollout_buffer.generator_ready = self.n_steps, True, False
         self._last_obs = {key: np.concatenate([segment['last_obs'][key] for segment in segments])
                           for key in segments[0]['last_obs']}
