@@ -1,20 +1,11 @@
-import os
-import random
-
 import numpy as np
 import torch
 import torch.nn as nn
 from gymnasium import spaces
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.policies import MultiInputActorCriticPolicy
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from torch.distributions import Categorical
 
-from environment import CREnv, entity_names
-from strategies import (
-    make_opponent_pool,
-)
+from environment import entity_names
 from train import CRFeatureExtractor
 
 
@@ -312,62 +303,3 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         latent_pi, _ = self._latents(observation)
         actions, _ = self._sample_action(latent_pi, observation, deterministic)
         return actions
-
-
-opponent_pool = make_opponent_pool()
-
-
-def make_env(rank):
-    def factory():
-        random.seed(10_000 + rank)
-        np.random.seed(10_000 + rank)
-        torch.set_num_threads(1)
-        return CREnv(opponent_pool=make_opponent_pool())
-    return factory
-
-
-if __name__ == "__main__":
-    debug = False
-    if debug:
-        env = CREnv(opponent_pool=opponent_pool)
-        n_envs = 1
-        n_steps = 2048
-    else:
-        n_envs = 16
-        env = SubprocVecEnv(
-            [make_env(rank) for rank in range(n_envs)], start_method="spawn"
-        )
-        env = VecMonitor(env)
-        n_steps = 8192 // n_envs
-
-    model_name = "cr_decision"
-    ent_coef = 0.005
-    policy_kwargs = {"features_extractor_class": CRFeatureExtractor}
-    if (not os.path.exists(f'{model_name}.zip')) or debug:
-        model = PPO(
-            ContentMaskedAutoregressivePolicy,
-            env,
-            policy_kwargs=policy_kwargs,
-            n_steps=n_steps,
-            batch_size=256,
-            learning_rate=1e-4,
-            n_epochs=4,
-            target_kl=0.03,
-            ent_coef=ent_coef,
-            device="cuda",
-            seed=0,
-            verbose=1,
-            tensorboard_log=f"./{model_name}_dir/",
-        )
-    else:
-        model = PPO.load(model_name, env=env, device="cuda", learning_rate=1e-4, n_epochs=4, target_kl=0.03,
-                         tensorboard_log=f"./{model_name}_dir/", ent_coef=ent_coef)
-    callback = CheckpointCallback(
-        save_freq=100_000 // n_envs,
-        save_path=f"./{model_name}_dir/",
-        name_prefix="cr",
-    )
-    try:
-        model.learn(total_timesteps=15_000_000, callback=callback)
-    finally:
-        model.save(model_name)
