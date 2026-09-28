@@ -160,8 +160,14 @@ def main():
     from masked_spatial import MaskedSpatialPolicy
     from parallel_rollout import ParallelPPO, ParallelVecEnv
     from stable_baselines3.common.logger import configure
+    from stable_baselines3.common.utils import get_device
 
     torch.set_num_threads(1)
+    resolved_device = str(get_device(args.device))
+    print(f"requested_device={args.device} resolved_device={resolved_device}", flush=True)
+    if (args.device == "auto" and resolved_device == "cpu"
+            and torch.backends.mps.is_available()):
+        print("note: auto selected CPU; use --device mps on this Mac", flush=True)
 
     class TimedPPO(ParallelPPO):
         def synchronize(self):
@@ -227,7 +233,7 @@ def main():
         "allocated_cpus": allocated,
         "torch": torch.__version__,
         "stable_baselines3": stable_baselines3.__version__,
-        "device": args.device,
+        "device": resolved_device,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "checkpoint": str(target) if target else None,
         "checkpoint_sha256": sha256(target) if target else None,
@@ -265,7 +271,7 @@ def main():
                     custom["n_steps"] = args.n_steps
                     custom["batch_size"] = min(args.n_steps * count, 256)
                 model = TimedPPO.load(
-                    target, env=env, device=args.device, custom_objects=custom,
+                    target, env=env, device=resolved_device, custom_objects=custom,
                 )
             else:
                 model = TimedPPO(
@@ -279,7 +285,7 @@ def main():
                     ent_coef=0.005,
                     gamma=0.99,
                     gae_lambda=0.95,
-                    device=args.device,
+                    device=resolved_device,
                     seed=args.seed + repeat,
                     verbose=0,
                 )

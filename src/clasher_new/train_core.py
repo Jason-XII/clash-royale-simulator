@@ -93,9 +93,10 @@ def _opponent_mask(env):
 class FrozenPolicy:
     """Use one checkpoint as a player-1 opponent."""
 
-    def __init__(self, checkpoint):
+    def __init__(self, checkpoint, deterministic=False):
         self.path = str(Path(checkpoint))
         self.model = PPO.load(self.path, device="cpu")
+        self.deterministic = deterministic
         self.env = None
         self.__name__ = "frozen_" + Path(checkpoint).stem
 
@@ -110,7 +111,7 @@ class FrozenPolicy:
             raise RuntimeError("FrozenPolicy must be bound to its battle environment")
         action, _ = self.model.predict(
             dict(observation, legal_mask=_opponent_mask(self.env)),
-            deterministic=False,
+            deterministic=self.deterministic,
         )
         return tuple(map(int, np.asarray(action).reshape(-1)[:3]))
 
@@ -359,9 +360,9 @@ def evaluation_opponents():
     ]
 
 
-def evaluate_as_player_one(checkpoint, games=20, seed=0):
+def evaluate_as_player_one(checkpoint, games=20, seed=0, deterministic=False):
     """Diagnostic for the same frozen policy acting through the opponent side."""
-    opponent = FrozenPolicy(checkpoint)
+    opponent = FrozenPolicy(checkpoint, deterministic=deterministic)
     env = CREnv(opponent_model=opponent)
     opponent.bind_env(env)
     wins = 0
@@ -373,13 +374,16 @@ def evaluate_as_player_one(checkpoint, games=20, seed=0):
                 action = counterpush_strategy(obs)
                 obs, _, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
-            wins += env.battle.winner == 1
+            winner = env.battle.winner
+            if winner not in (0, 1):
+                raise RuntimeError(f"game ended without a valid winner: {winner!r}")
+            wins += int(winner == 1)
     finally:
         env.close()
     return {"wins": wins, "games": games, "win_rate": wins / games if games else 0.0}
 
 
-def evaluate(checkpoint, games=20, seed=0, opponents=None):
+def evaluate(checkpoint, games=20, seed=0, opponents=None, deterministic=False):
     """Evaluate a checkpoint and return machine-readable behavioral metrics."""
     model = PPO.load(checkpoint, device="cpu")
     opponents = list(opponents if opponents is not None else evaluation_opponents())
@@ -406,7 +410,7 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None):
                         if legal[slot].any():
                             card = entity_names[int(hand[slot])]
                             available[card] = available.get(card, 0) + 1
-                    action, _ = model.predict(obs, deterministic=True)
+                    action, _ = model.predict(obs, deterministic=deterministic)
                     slot, y, x = map(int, np.asarray(action).reshape(-1)[:3])
                     decisions += 1
                     if slot:
@@ -420,11 +424,15 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None):
                     else:
                         obs, _, terminated, truncated, _ = env.step((0, 0, 0))
                     done = terminated or truncated
-                wins += env.unwrapped.battle.winner == 0
+                winner = env.unwrapped.battle.winner
+                if winner not in (0, 1):
+                    raise RuntimeError(f"game ended without a valid winner: {winner!r}")
+                wins += int(winner == 0)
         finally:
             env.close()
         result = {
             "wins": wins, "games": games,
+            "losses": games - wins,
             "win_rate": wins / games if games else 0.0,
             "decisions": decisions,
             "deployments": deployments,
@@ -434,17 +442,21 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None):
             "cards_selected": selected,
         }
         results[name] = result
-        for key in ("wins", "games", "decisions", "deployments", "valid_deployments"):
+        for key in ("wins", "games", "losses", "decisions", "deployments", "valid_deployments"):
             total[key] += result.get(key, 0)
         for key, values in (("cards_available", available), ("cards_selected", selected)):
             for card, count in values.items():
                 total[key][card] = total[key].get(card, 0) + count
+    total["losses"] = total["games"] - total["wins"]
     total["win_rate"] = total["wins"] / total["games"] if total["games"] else 0.0
     total["deployment_success_rate"] = (
         total["valid_deployments"] / total["deployments"]
         if total["deployments"] else 0.0
     )
-    report = {"checkpoint": str(Path(checkpoint).resolve()), "total": total,
+    report = {"checkpoint": str(Path(checkpoint).resolve()),
+              "deterministic": deterministic, "total": total,
               "opponents": results}
-    report["player1_diagnostic"] = evaluate_as_player_one(checkpoint, games, seed)
+    report["player1_diagnostic"] = evaluate_as_player_one(
+        checkpoint, games, seed, deterministic=deterministic
+    )
     return report
