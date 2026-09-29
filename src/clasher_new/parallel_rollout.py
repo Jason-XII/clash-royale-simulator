@@ -108,7 +108,8 @@ class Events(BaseCallback):
             dtype=np.float32,
         )
         expected = self.model.gamma ** steps
-        if (not np.isfinite(steps).all() or not np.all(steps > 0)
+        if (not np.isfinite(steps).all()
+                or not np.all((steps > 0) | ((steps == 0) & self.locals['dones']))
                 or not np.allclose(discounts, expected, rtol=1e-5, atol=1e-7)):
             raise RuntimeError('Environment and PPO transition discounts disagree')
         self.model.rollout_buffer.discounts[position] = discounts
