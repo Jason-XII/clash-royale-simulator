@@ -2,7 +2,8 @@ import battle, player
 from core import Position
 
 import gymnasium as gym
-from random import shuffle, randint
+from contextlib import contextmanager
+from random import randint
 import time
 import numpy as np
 import random
@@ -11,6 +12,7 @@ from stable_baselines3.common.env_checker import check_env
 
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
+INITIAL_DECKS = (tuple(player_0_deck), tuple(player_1_deck))
 
 b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
                        player.PlayerState(1, player_1_deck, 10))
@@ -30,12 +32,16 @@ speed_types = [0, 0.75, 1.0, 1.5]
 
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False, speed=1.0):
+    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False,
+                 speed=1.0, discount_gamma=0.997):
         super().__init__()
+        if not 0 < discount_gamma <= 1:
+            raise ValueError("discount_gamma must be in (0, 1]")
         self.opponent = opponent_model
         self.opponent_pool = opponent_pool
         self.battle: battle.BattleState = None
         self.speed = speed
+        self.discount_gamma = float(discount_gamma)
         self.observation_space = gym.spaces.Dict({
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8, 32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
@@ -53,14 +59,17 @@ class CREnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        shuffle(player_0_deck)
-        shuffle(player_1_deck)
+        decks = [self.np_random.permutation(cards).tolist() for cards in INITIAL_DECKS]
+        opponent_seed = int(self.np_random.integers(2**32))
+        self.opponent_random = random.Random(opponent_seed)
+        self.opponent_numpy = np.random.RandomState(opponent_seed)
         if self.opponent_pool:
-            self.opponent = random.choice(self.opponent_pool)
+            self.opponent = self.opponent_pool[int(self.np_random.integers(len(self.opponent_pool)))]
         if callable(getattr(self.opponent, 'reset', None)):
-            self.opponent.reset()
-        self.battle = battle.BattleState(player.PlayerState(0, player_0_deck[:], 5.0),
-                       player.PlayerState(1, player_1_deck[:], 5.0))
+            with self._opponent_rng():
+                self.opponent.reset()
+        self.battle = battle.BattleState(player.PlayerState(0, decks[0], 5.0),
+                       player.PlayerState(1, decks[1], 5.0))
         if self.visualize:
             from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
@@ -71,9 +80,24 @@ class CREnv(gym.Env):
         self.observe(1)
         return observation, {}
 
+    @contextmanager
+    def _opponent_rng(self):
+        """Isolate legacy scripts that use process-global Python/NumPy RNGs."""
+        python_state, numpy_state = random.getstate(), np.random.get_state()
+        random.setstate(self.opponent_random.getstate())
+        np.random.set_state(self.opponent_numpy.get_state())
+        try:
+            yield
+        finally:
+            self.opponent_random.setstate(random.getstate())
+            self.opponent_numpy.set_state(np.random.get_state())
+            random.setstate(python_state)
+            np.random.set_state(numpy_state)
+
     def opponent_action(self):
         obs1 = self.observe(1)
-        opponent_action = self.opponent(obs1)
+        with self._opponent_rng():
+            opponent_action = self.opponent(obs1)
         slot, y, x = opponent_action
         p1 = self.battle.players[1]
         if slot != 0:
@@ -84,12 +108,18 @@ class CREnv(gym.Env):
 
     def step(self, action):
         observation, reward, terminated, truncated, info = self._step_once(action)
+        elapsed_seconds = info["elapsed_seconds"]
         p0 = self.battle.players[0]
         while not (terminated or truncated) and not any(
             p0.can_play_card(card) for card in p0.cycle[:4]
         ):
-            observation, next_reward, terminated, truncated, _ = self._step_once((0, 0, 0))
-            reward += next_reward
+            observation, next_reward, terminated, truncated, next_info = self._step_once((0, 0, 0))
+            reward += self.discount_gamma ** (elapsed_seconds / 0.5) * next_reward
+            elapsed_seconds += next_info["elapsed_seconds"]
+        discount_steps = elapsed_seconds / 0.5
+        info["elapsed_seconds"] = elapsed_seconds
+        info["discount_steps"] = discount_steps
+        info["transition_discount"] = self.discount_gamma ** discount_steps
         return observation, reward, terminated, truncated, info
 
     def _step_once(self, action):
@@ -102,6 +132,7 @@ class CREnv(gym.Env):
         """
 
         p0, p1 = self.battle.players
+        time_before = self.battle.time
         blue_hps_old = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
         red_hps_old = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
         blue_left = 3-p0.get_crown_count()
@@ -127,7 +158,7 @@ class CREnv(gym.Env):
         blue_left_new = 3-p0.get_crown_count()
         red_left_new = 3-p1.get_crown_count()
 
-        reward = 5*(red_left-red_left_new)-5*(blue_left-blue_left_new)+0.001*(red_hps_old-red_hps_new)-0.0012*(blue_hps_old-blue_hps_new)
+        reward = 2*(red_left-red_left_new)-2*(blue_left-blue_left_new)+0.0001*(red_hps_old-red_hps_new)-0.0001*(blue_hps_old-blue_hps_new)
         if self.battle.game_over:
             #print('Battle over.', self.battle.winner, reward, p0.king_tower_hp, p0.left_tower_hp, p0.right_tower_hp,
             #      p1.king_tower_hp, p1.left_tower_hp, p1.right_tower_hp)
@@ -135,7 +166,9 @@ class CREnv(gym.Env):
                 reward += 10
             else:
                 reward -= 10
-        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {}
+        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
+            "elapsed_seconds": self.battle.time - time_before,
+        }
 
 
     def observe(self, player_id_observe=0):

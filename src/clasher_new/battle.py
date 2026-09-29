@@ -705,7 +705,7 @@ class BattleState:
                     if self.players[1].right_tower_hp > 0: return False
         elif player_id == 1:
             if position.y > 31.0 and (position.x <= 6.0 or position.x > 12.0): return False
-            if position.y <= 10: return False
+            if position.y <= 11: return False
             if position.y <= 17.0:
                 if position.x <= 9:
                     if self.players[0].left_tower_hp > 0: return False
