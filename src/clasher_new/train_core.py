@@ -23,7 +23,7 @@ from stable_baselines3 import PPO
 
 from environment import CREnv, entity_names
 from masked_spatial import LegalPlacement, MaskedSpatialPolicy
-from parallel_rollout import ParallelPPO, ParallelVecEnv
+from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import (
     DiverseOpponent,
     STRATEGIES,
@@ -33,9 +33,16 @@ from card_utils import Card
 from core import Position
 
 
-DEFAULT_GAMMA = 0.99
-DEFAULT_GAE_LAMBDA = 0.95
+DEFAULT_GAMMA = 0.997
+DEFAULT_GAE_LAMBDA = 0.995
 COUNTER_FRACTION = 0.20
+# Bump this when the return or entropy objective changes, even if gamma does not.
+TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v2"
+PPO_SETTINGS = {
+    "workers": "n_envs", "rollout_steps": "n_steps", "batch_size": "batch_size",
+    "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
+    "entropy": "ent_coef", "gamma": "gamma", "gae_lambda": "gae_lambda",
+}
 
 
 class EpisodeReflection(gym.Wrapper):
@@ -206,15 +213,16 @@ class LeagueOpponent:
         return self.opponent(observation)
 
 
-def make_env(rank, seed, opponent_factory, reflect=True):
+def make_env(rank, seed, opponent_factory, reflect=True, discount_gamma=DEFAULT_GAMMA):
     """Return a picklable worker factory for ParallelVecEnv."""
     def factory():
         env_seed = 10_000 + seed * 1_000 + rank
         random.seed(env_seed)
         np.random.seed(env_seed)
         torch.set_num_threads(1)
+        torch.manual_seed(env_seed)
         opponent = opponent_factory()
-        env = CREnv(opponent_model=opponent)
+        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma)
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(env)
         if reflect:
@@ -271,30 +279,55 @@ class TrainConfig:
             raise ValueError("gamma and gae_lambda must be in (0, 1]")
 
 
-def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None):
-    """Train one candidate with one frozen opponent mixture."""
+def effective_settings(model):
+    return {key: getattr(model, attribute) for key, attribute in PPO_SETTINGS.items()}
+
+
+def check_continuation(model, config):
+    differences = [f"{key}: checkpoint={value!r}, requested={getattr(config, key)!r}"
+                   for key, value in effective_settings(model).items()
+                   if value != getattr(config, key)]
+    if getattr(model, "training_semantics", None) != TRAINING_SEMANTICS:
+        differences.append("checkpoint has an older or unknown training objective")
+    if not isinstance(model.policy, MaskedSpatialPolicy):
+        differences.append("checkpoint does not use MaskedSpatialPolicy")
+    if differences:
+        raise ValueError("Cannot continue this checkpoint: " + "; ".join(differences)
+                         + ". Use --initial-checkpoint in a new run to transfer its weights.")
+
+
+def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None,
+                initialize=False):
+    """Continue optimizer state, or explicitly initialize a fresh PPO from weights."""
     config = config or TrainConfig()
     config.validate()
+    if initialize and not initial:
+        raise ValueError("initialize requires an initial checkpoint")
     output = Path(output)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"output directory is not empty: {output}")
+    source = None
+    if initial:
+        # Validate continuation before starting processes or creating run output.
+        source = ParallelPPO.load(initial, device=config.device)
+        if not initialize:
+            check_continuation(source, config)
+    source_steps = int(source.num_timesteps) if source else None
+    reset_value_head = bool(initialize and (
+        source.gamma != config.gamma
+        or getattr(source, "training_semantics", None) != TRAINING_SEMANTICS
+    ))
     output.mkdir(parents=True, exist_ok=False)
     env = ParallelVecEnv(
-        [make_env(rank, seed, opponent_factory) for rank in range(config.workers)],
+        [make_env(rank, seed, opponent_factory, discount_gamma=config.gamma)
+         for rank in range(config.workers)],
         monitor=output / "monitor.csv",
     )
     try:
-        if initial:
-            model = ParallelPPO.load(
-                initial,
-                env=env,
-                device=config.device,
-                custom_objects={
-                    "observation_space": env.observation_space,
-                    "policy_class": MaskedSpatialPolicy,
-                },
-                tensorboard_log=str(output / "tensorboard"),
-            )
+        if source is not None and not initialize:
+            model = source
+            model.set_env(env)
+            model.tensorboard_log = str(output / "tensorboard")
             model.set_random_seed(seed)
             reset_num_timesteps = False
         else:
@@ -309,23 +342,41 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
                 ent_coef=config.entropy,
                 gamma=config.gamma,
                 gae_lambda=config.gae_lambda,
+                rollout_buffer_class=VariableDiscountBuffer,
                 device=config.device,
                 seed=seed,
+                policy_kwargs=source.policy_kwargs if source is not None else None,
                 verbose=1,
                 tensorboard_log=str(output / "tensorboard"),
             )
+            if source is not None:
+                weights = source.policy.state_dict().copy()
+                if reset_value_head:
+                    for key, value in model.policy.state_dict().items():
+                        if key.startswith("value_net."):
+                            weights[key] = value
+                model.policy.load_state_dict(weights, strict=True)
             reset_num_timesteps = True
-        if abs(float(model.gamma) - config.gamma) > 1e-12:
-            raise ValueError(f"checkpoint gamma {model.gamma} != configured gamma {config.gamma}")
+        model.training_semantics = TRAINING_SEMANTICS
+        check_continuation(model, config)
+        buffer = model.rollout_buffer
+        if (not isinstance(buffer, VariableDiscountBuffer)
+                or (buffer.buffer_size, buffer.n_envs, buffer.gamma, buffer.gae_lambda)
+                != (model.n_steps, model.n_envs, model.gamma, model.gae_lambda)):
+            raise ValueError("PPO rollout buffer does not match the configured training settings")
         metadata = {
             "initial": str(Path(initial).resolve()) if initial else None,
+            "mode": "initialize" if initialize else "continue" if initial else "fresh",
+            "source_steps": source_steps,
+            "reset_value_head": reset_value_head,
+            "training_semantics": model.training_semantics,
             "initial_steps": int(model.num_timesteps),
             "requested_steps": int(steps),
             "seed": seed,
-            "workers": config.workers,
-            "rollout_steps": config.rollout_steps,
-            "gamma": float(model.gamma),
-            "gae_lambda": float(model.gae_lambda),
+            **effective_settings(model),
+            "discount_unit_seconds": 0.5,
+            "elapsed_time_discounting": True,
+            "elapsed_time_gae_lambda": True,
             "policy": type(model.policy).__name__,
             "collector": "parallel_rollout",
         }
@@ -388,7 +439,7 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None, deterministic=False):
     model = PPO.load(checkpoint, device="cpu")
     opponents = list(opponents if opponents is not None else evaluation_opponents())
     results = {}
-    total = {"wins": 0, "games": 0, "decisions": 0, "deployments": 0,
+    total = {"wins": 0, "games": 0, "losses": 0, "decisions": 0, "deployments": 0,
              "valid_deployments": 0, "cards_available": {}, "cards_selected": {}}
     for opponent_index, opponent in enumerate(opponents):
         name = getattr(opponent, "__name__", type(opponent).__name__)

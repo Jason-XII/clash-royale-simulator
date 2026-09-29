@@ -124,6 +124,7 @@ class AutoregressivePolicy(MultiInputActorCriticPolicy):
 class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
     """Score actual hand cards, mask unaffordable ones, then place the selected card."""
 
+    WAIT_PLAY_ENTROPY_WEIGHT = 0.10
     PLACEMENT_ENTROPY_WEIGHT = 0.25
 
     CARD_COSTS = {
@@ -239,10 +240,24 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         return torch.stack((slot, y, x), dim=1), log_prob
 
     def _conditional_entropy(self, latent_pi, card_dist, hand, obs):
-        """Normalized card entropy plus conditional placement entropy."""
+        """Balanced entropy for wait/play, card, and placement decisions."""
         card_distribution = Categorical(logits=card_dist.logits[:, 1:])
         elixir = obs["elixir"].float().reshape(-1, 1)
         affordable_count = (self.card_cost_table[hand] <= elixir).sum(dim=1)
+
+        wait_play_distribution = Categorical(logits=torch.stack((
+            card_dist.logits[:, 0],
+            torch.logsumexp(card_dist.logits[:, 1:], dim=1),
+        ), dim=1))
+        wait_play_eligible = affordable_count >= 1
+        wait_play_scale = (
+            wait_play_eligible.numel() / wait_play_eligible.sum().clamp(min=1)
+        )
+        wait_play_entropy = (
+            wait_play_distribution.entropy() / np.log(2)
+            * wait_play_eligible.float()
+            * wait_play_scale
+        )
 
         card_eligible = affordable_count >= 2
         # PPO averages over the whole batch. Rescale so forced waits and states
@@ -251,9 +266,9 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         card_entropy = card_distribution.entropy() / np.log(4)
         card_entropy = card_entropy * card_eligible.float() * card_scale
 
-        # Compute E[H(tile | card)] under the affordable-card distribution.
-        # Multiplying by P(play) makes this the placement contribution to the
-        # joint policy entropy; forced no-op states contribute nothing.
+        # Compute E[H(tile | card)] conditional on playing. Keeping this term
+        # independent of P(play) prevents placement diversity from rewarding
+        # immediate spending.
         placement_entropy = torch.zeros_like(card_entropy)
         for slot_index in range(hand.shape[1]):
             placement_dist = self._placement_distribution(
@@ -263,19 +278,33 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
                 card_distribution.probs[:, slot_index] * placement_dist.entropy()
             )
 
+        raw_placement_entropy = placement_entropy
         placement_eligible = affordable_count >= 1
         placement_scale = (
             placement_eligible.numel() / placement_eligible.sum().clamp(min=1)
         )
-        play_probability = 1.0 - card_dist.probs[:, 0]
         placement_entropy = placement_entropy / np.log(32 * 18)
         placement_entropy = (
             placement_entropy
-            * play_probability
             * placement_eligible.float()
             * placement_scale
         )
-        return card_entropy + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy
+        objective = (
+            self.WAIT_PLAY_ENTROPY_WEIGHT * wait_play_entropy
+            + card_entropy
+            + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy
+        )
+        self.entropy_diagnostics = {
+            "wait_play": wait_play_entropy.mean().detach(),
+            "actionable_card": card_entropy.mean().detach(),
+            "legal_placement": placement_entropy.mean().detach(),
+            "joint_action": (
+                card_dist.entropy()
+                + (1 - card_dist.probs[:, 0]) * raw_placement_entropy
+            ).mean().detach(),
+            "objective": objective.mean().detach(),
+        }
+        return objective
 
     def forward(self, obs, deterministic=False):
         latent_pi, latent_vf = self._latents(obs)

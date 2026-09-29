@@ -126,8 +126,8 @@ class CREnv(gym.Env):
         """
         The action is a tuple with three values: (slot, y, x). When slot=0, no action is performed. Else deploy card on
         slot to the corresponding position on the arena.
-        Advance half a second. The reward is calculated by the damage dealt/taken,
-        destroyed tower/lost tower and won game/lose game.
+        Advance half a second. Reward combines the game outcome with
+        elapsed-time potential shaping from tower count and HP advantage.
         The opponent is a function that takes in the observation and outputs the action tuple.
         """
 
@@ -158,14 +158,22 @@ class CREnv(gym.Env):
         blue_left_new = 3-p0.get_crown_count()
         red_left_new = 3-p1.get_crown_count()
 
-        reward = 2*(red_left-red_left_new)-2*(blue_left-blue_left_new)+0.0001*(red_hps_old-red_hps_new)-0.0001*(blue_hps_old-blue_hps_new)
+        potential_before = (
+            2 * (blue_left - red_left)
+            + 0.0001 * (blue_hps_old - red_hps_old)
+        )
+        potential_after = (
+            2 * (blue_left_new - red_left_new)
+            + 0.0001 * (blue_hps_new - red_hps_new)
+        )
+        elapsed = self.battle.time - time_before
+        discount = self.discount_gamma ** (elapsed / 0.5)
         if self.battle.game_over:
-            #print('Battle over.', self.battle.winner, reward, p0.king_tower_hp, p0.left_tower_hp, p0.right_tower_hp,
-            #      p1.king_tower_hp, p1.left_tower_hp, p1.right_tower_hp)
-            if self.battle.winner == 0:
-                reward += 10
-            else:
-                reward -= 10
+            potential_after = 0.0
+
+        reward = discount * potential_after - potential_before
+        if self.battle.game_over:
+            reward += 10 if self.battle.winner == 0 else -10
         return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
             "elapsed_seconds": self.battle.time - time_before,
         }

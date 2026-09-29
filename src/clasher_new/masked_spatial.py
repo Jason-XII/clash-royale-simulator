@@ -68,10 +68,20 @@ class MaskedSpatialPolicy(SpatialPlacementPolicy):
         return Categorical(logits=distribution.logits.masked_fill(~tiles, -1e9))
 
     def _conditional_entropy(self, latent_pi, card_dist, hand, obs):
-        # Identical normalized entropy objective to the parent, with simulator
+        # Balanced entropy objective from the parent, with simulator
         # actionability replacing float32 elixir comparisons.
         conditional = Categorical(logits=card_dist.logits[:, 1:])
         count = obs["legal_mask"].flatten(2).bool().any(dim=2).sum(dim=1)
+        wait_play = Categorical(logits=torch.stack((
+            card_dist.logits[:, 0],
+            torch.logsumexp(card_dist.logits[:, 1:], dim=1),
+        ), dim=1))
+        wait_play_eligible = count >= 1
+        wait_play_scale = (
+            wait_play_eligible.numel() / wait_play_eligible.sum().clamp(min=1)
+        )
+        wait_play_entropy = (wait_play.entropy() / np.log(2)
+                             * wait_play_eligible.float() * wait_play_scale)
         card_eligible = count >= 2
         card_scale = card_eligible.numel() / card_eligible.sum().clamp(min=1)
         card_entropy = (conditional.entropy() / np.log(4)
@@ -80,9 +90,22 @@ class MaskedSpatialPolicy(SpatialPlacementPolicy):
         for slot in range(4):
             placement = self._placement_distribution(latent_pi, hand[:, slot])
             placement_entropy += conditional.probs[:, slot] * placement.entropy()
+        raw_placement_entropy = placement_entropy
         place_eligible = count >= 1
         place_scale = place_eligible.numel() / place_eligible.sum().clamp(min=1)
         placement_entropy = (placement_entropy / np.log(576)
-                             * (1 - card_dist.probs[:, 0])
                              * place_eligible.float() * place_scale)
-        return card_entropy + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy
+        objective = (self.WAIT_PLAY_ENTROPY_WEIGHT * wait_play_entropy
+                     + card_entropy
+                     + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy)
+        self.entropy_diagnostics = {
+            "wait_play": wait_play_entropy.mean().detach(),
+            "actionable_card": card_entropy.mean().detach(),
+            "legal_placement": placement_entropy.mean().detach(),
+            "joint_action": (
+                card_dist.entropy()
+                + (1 - card_dist.probs[:, 0]) * raw_placement_entropy
+            ).mean().detach(),
+            "objective": objective.mean().detach(),
+        }
+        return objective

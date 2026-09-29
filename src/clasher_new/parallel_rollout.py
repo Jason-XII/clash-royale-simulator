@@ -23,7 +23,8 @@ from stable_baselines3.common.monitor import ResultsWriter
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
 
-FIELDS = ('actions', 'rewards', 'episode_starts', 'values', 'log_probs', 'advantages', 'returns')
+FIELDS = ('actions', 'rewards', 'episode_starts', 'values', 'log_probs',
+          'advantages', 'returns', 'discounts', 'lambda_discounts')
 
 
 def attach(buffer, descriptors, rank=None):
@@ -37,7 +38,45 @@ def attach(buffer, descriptors, rank=None):
             setattr(buffer, key, value)
 
 
-class SharedBuffer(DictRolloutBuffer):
+class VariableDiscountBuffer(DictRolloutBuffer):
+    """GAE with one discount per transition instead of one per decision."""
+
+    def reset(self):
+        super().reset()
+        self.discounts = np.full(
+            (self.buffer_size, self.n_envs), self.gamma, dtype=np.float32
+        )
+        self.lambda_discounts = np.full(
+            (self.buffer_size, self.n_envs), self.gae_lambda, dtype=np.float32
+        )
+
+    def compute_returns_and_advantage(self, last_values, dones):
+        last_values = last_values.clone().cpu().numpy().flatten()
+        last_gae_lam = 0
+        for step in reversed(range(self.buffer_size)):
+            if step == self.buffer_size - 1:
+                next_non_terminal = 1.0 - dones.astype(np.float32)
+                next_values = last_values
+            else:
+                next_non_terminal = 1.0 - self.episode_starts[step + 1]
+                next_values = self.values[step + 1]
+            delta = (
+                self.rewards[step]
+                + self.discounts[step] * next_values * next_non_terminal
+                - self.values[step]
+            )
+            last_gae_lam = (
+                delta
+                + self.discounts[step]
+                * self.lambda_discounts[step]
+                * next_non_terminal
+                * last_gae_lam
+            )
+            self.advantages[step] = last_gae_lam
+        self.returns = self.advantages + self.values
+
+
+class SharedBuffer(VariableDiscountBuffer):
     def __init__(self, *args, descriptors, rank, **kwargs):
         self.descriptors, self.rank = descriptors, rank
         super().__init__(*args, **kwargs)
@@ -58,6 +97,22 @@ class SharedBuffer(DictRolloutBuffer):
 
 class Events(BaseCallback):
     def _on_step(self):
+        position = self.model.rollout_buffer.pos
+        steps = np.asarray(
+            [info.get('discount_steps', 1) for info in self.locals['infos']],
+            dtype=np.float32,
+        )
+        discounts = np.asarray(
+            [info.get('transition_discount', self.model.gamma ** step)
+             for info, step in zip(self.locals['infos'], steps)],
+            dtype=np.float32,
+        )
+        expected = self.model.gamma ** steps
+        if (not np.isfinite(steps).all() or not np.all(steps > 0)
+                or not np.allclose(discounts, expected, rtol=1e-5, atol=1e-7)):
+            raise RuntimeError('Environment and PPO transition discounts disagree')
+        self.model.rollout_buffer.discounts[position] = discounts
+        self.model.rollout_buffer.lambda_discounts[position] = self.model.gae_lambda ** steps
         self.events.append((self.locals['infos'], self.locals['dones'].copy()))
         return True
 
@@ -188,6 +243,11 @@ class ParallelVecEnv(SubprocVecEnv):
 
 
 class ParallelPPO(PPO):
+    def train(self):
+        super().train()
+        for name, value in getattr(self.policy, 'entropy_diagnostics', {}).items():
+            self.logger.record(f'exploration/{name}_entropy', float(value.cpu()))
+
     def collect_rollouts(self, env, callback, rollout_buffer, n_rollout_steps):
         if not isinstance(env, ParallelVecEnv):
             raise TypeError('ParallelPPO requires ParallelVecEnv')
