@@ -14,7 +14,8 @@ import random
 from stable_baselines3 import PPO
 
 import masked_spatial  # registers MaskedSpatialPolicy so PPO.load can unpickle it
-from arena import TileGrid as _TileGrid
+from battle import BattleState, Building
+from player import PlayerState
 from core import Position as _Pos
 
 pygame.init()
@@ -30,10 +31,15 @@ models = [PPO.load("cr_adaptation/cr_13700000_steps.zip", device="cpu")]
 # Static legal-deploy tiles for the local player (own-half zones; fences & tower tiles
 # excluded). The live client has no simulator battle, so we approximate legality with the
 # arena rules; the real client still enforces true legality on each swipe.
-_GRID = _TileGrid()
-_TROOP_TILES = np.array(
-    [[_GRID.can_deploy_at(_Pos(x + 0.5, y + 0.5), 0, None, False) for x in range(18)]
-     for y in range(32)], dtype=np.int8)
+_MASK_BATTLE = BattleState(PlayerState(0, [], 0), PlayerState(1, [], 0))
+_MASK_BATTLE.building_positions = [
+    (e.position.x, e.position.y, e.data.collision_radius)
+    for e in _MASK_BATTLE.entities.values() if isinstance(e, Building)
+]
+_TROOP_TILES = np.array([
+    [_MASK_BATTLE.can_place_troop(0, _Pos(x + .5, y + .5))
+     for x in range(18)] for y in range(32)
+], dtype=np.int8)
 
 
 def build_legal_mask(hand_names, own_elixir):
