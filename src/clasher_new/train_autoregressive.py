@@ -199,7 +199,8 @@ class ContentMaskedAutoregressivePolicy(MultiInputActorCriticPolicy):
         elixir = obs["elixir"].float().reshape(-1, 1)
         costs = self.card_cost_table[hand]
         affordable = costs <= elixir
-        card_scores = card_scores.masked_fill(~affordable, -1e9)
+        if not getattr(self, "allow_saving", False):
+            card_scores = card_scores.masked_fill(~affordable, -1e9)
 
         noop_score = self.noop_head(latent_pi)
         logits = torch.cat((noop_score, card_scores), dim=1)

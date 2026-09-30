@@ -11,7 +11,7 @@ from stable_baselines3 import PPO
 
 from card_utils import Card
 from core import Position
-from environment import CREnv, entity_names
+from environment import CREnv, CardSaving, entity_names
 from strategies import DiverseOpponent
 from train_core import ReflectedOpponent
 
@@ -109,6 +109,8 @@ class EvaluationActor:
         self.python_state = random.Random(self.seed).getstate()
         self.numpy_state = np.random.RandomState(self.seed).get_state()
         self.decisions = self.deployments = self.valid = 0
+        self.saving = CardSaving()
+        self.saves = 0
         self.available, self.selected = Counter(), Counter()
         self.last_action = (0, 0, 0)
         if self.script is not None:
@@ -131,6 +133,8 @@ class EvaluationActor:
     def __call__(self, observation):
         mask = legal_mask(self.env, self.side)
         self.last_action = (0, 0, 0)
+        if self.saving.waiting(self.env.battle.players[self.side]):
+            return self.last_action
         if not mask.any():
             return self.last_action
         self.decisions += 1
@@ -143,6 +147,10 @@ class EvaluationActor:
             else:
                 action = self.script(observation)
         self.last_action = tuple(map(int, action))
+        if self.model is not None and getattr(self.model.policy, "allow_saving", False):
+            self.last_action = self.saving.resolve(
+                self.env.battle.players[self.side], self.last_action)
+            self.saves += int(self.saving.card is not None)
         slot, _, _ = self.last_action
         if slot:
             self.deployments += 1
@@ -159,7 +167,8 @@ def _summary(rows):
               "win_rate": wins / games if games else 0.0,
               "deployments": deployments, "valid_deployments": valid,
               "deployment_success_rate": valid / deployments if deployments else 0.0,
-              "decisions": sum(row["decisions"] for row in rows)}
+              "decisions": sum(row["decisions"] for row in rows),
+              "saving_actions": sum(row.get("saving_actions", 0) for row in rows)}
     for key in ("cards_available", "cards_selected"):
         counts = Counter()
         for row in rows:
@@ -207,7 +216,7 @@ def _evaluate_schedule(checkpoint, schedule):
                 before = tuple(env.battle.players[side].cycle)
                 action = actors[0](observation)
                 # Both sides receive one action opportunity per half-second.
-                # Unaffordable actions are skipped by the actor, as in training.
+                # Actors enforce saving commitments and skip forced waits.
                 observation, _, terminated, truncated, _ = env._step_once(action)
                 if candidate.last_action[0]:
                     candidate.valid += before != tuple(env.battle.players[side].cycle)
@@ -220,6 +229,7 @@ def _evaluate_schedule(checkpoint, schedule):
                          "decisions": candidate.decisions,
                          "deployments": candidate.deployments,
                          "valid_deployments": candidate.valid,
+                         "saving_actions": candidate.saves,
                          "cards_available": dict(candidate.available),
                          "cards_selected": dict(candidate.selected)})
         finally:

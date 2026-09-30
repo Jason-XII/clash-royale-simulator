@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import CREnv, entity_names
+from environment import CREnv, CardSaving, entity_names
 from masked_spatial import LegalPlacement, MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import (
@@ -43,6 +43,10 @@ PPO_SETTINGS = {
     "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
     "entropy": "ent_coef", "gamma": "gamma", "gae_lambda": "gae_lambda",
 }
+
+
+def training_semantics(config):
+    return TRAINING_SEMANTICS + ("_card_saving_v1" if config.allow_saving else "")
 
 
 class EpisodeReflection(gym.Wrapper):
@@ -105,22 +109,31 @@ class FrozenPolicy:
         self.model = PPO.load(self.path, device="cpu")
         self.deterministic = deterministic
         self.env = None
+        self.saving = CardSaving()
         self.__name__ = "frozen_" + Path(checkpoint).stem
 
     def bind_env(self, env):
         self.env = env
 
     def reset(self):
-        pass
+        self.saving = CardSaving()
 
     def __call__(self, observation):
         if self.env is None:
             raise RuntimeError("FrozenPolicy must be bound to its battle environment")
+        player = self.env.battle.players[1]
+        mask = _opponent_mask(self.env)
+        allow_saving = getattr(self.model.policy, "allow_saving", False)
+        if allow_saving and (self.saving.waiting(player) or not mask.any()):
+            return (0, 0, 0)
         action, _ = self.model.predict(
-            dict(observation, legal_mask=_opponent_mask(self.env)),
+            dict(observation, legal_mask=mask),
             deterministic=self.deterministic,
         )
-        return tuple(map(int, np.asarray(action).reshape(-1)[:3]))
+        action = tuple(map(int, np.asarray(action).reshape(-1)[:3]))
+        if allow_saving:
+            action = self.saving.resolve(player, action)
+        return action
 
 
 class ReflectedOpponent:
@@ -213,7 +226,8 @@ class LeagueOpponent:
         return self.opponent(observation)
 
 
-def make_env(rank, seed, opponent_factory, reflect=True, discount_gamma=DEFAULT_GAMMA):
+def make_env(rank, seed, opponent_factory, reflect=True, discount_gamma=DEFAULT_GAMMA,
+             allow_saving=False):
     """Return a picklable worker factory for ParallelVecEnv."""
     def factory():
         env_seed = 10_000 + seed * 1_000 + rank
@@ -222,7 +236,8 @@ def make_env(rank, seed, opponent_factory, reflect=True, discount_gamma=DEFAULT_
         torch.set_num_threads(1)
         torch.manual_seed(env_seed)
         opponent = opponent_factory()
-        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma)
+        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma,
+                    allow_saving=allow_saving)
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(env)
         if reflect:
@@ -271,6 +286,7 @@ class TrainConfig:
     gamma: float = DEFAULT_GAMMA
     gae_lambda: float = DEFAULT_GAE_LAMBDA
     device: str = "auto"
+    allow_saving: bool = False
 
     def validate(self):
         if self.workers < 1 or self.rollout_steps < 1 or self.batch_size < 1:
@@ -287,8 +303,10 @@ def check_continuation(model, config):
     differences = [f"{key}: checkpoint={value!r}, requested={getattr(config, key)!r}"
                    for key, value in effective_settings(model).items()
                    if value != getattr(config, key)]
-    if getattr(model, "training_semantics", None) != TRAINING_SEMANTICS:
+    if getattr(model, "training_semantics", None) != training_semantics(config):
         differences.append("checkpoint has an older or unknown training objective")
+    if getattr(model.policy, "allow_saving", False) != config.allow_saving:
+        differences.append("checkpoint saving-action setting differs")
     if not isinstance(model.policy, MaskedSpatialPolicy):
         differences.append("checkpoint does not use MaskedSpatialPolicy")
     if differences:
@@ -315,11 +333,12 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
     source_steps = int(source.num_timesteps) if source else None
     reset_value_head = bool(initialize and (
         source.gamma != config.gamma
-        or getattr(source, "training_semantics", None) != TRAINING_SEMANTICS
+        or getattr(source, "training_semantics", None) != training_semantics(config)
     ))
     output.mkdir(parents=True, exist_ok=False)
     env = ParallelVecEnv(
-        [make_env(rank, seed, opponent_factory, discount_gamma=config.gamma)
+        [make_env(rank, seed, opponent_factory, discount_gamma=config.gamma,
+                  allow_saving=config.allow_saving)
          for rank in range(config.workers)],
         monitor=output / "monitor.csv",
     )
@@ -345,7 +364,8 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
                 rollout_buffer_class=VariableDiscountBuffer,
                 device=config.device,
                 seed=seed,
-                policy_kwargs=source.policy_kwargs if source is not None else None,
+                policy_kwargs={**(source.policy_kwargs if source is not None else {}),
+                               "allow_saving": config.allow_saving},
                 verbose=1,
                 tensorboard_log=str(output / "tensorboard"),
             )
@@ -357,7 +377,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
                             weights[key] = value
                 model.policy.load_state_dict(weights, strict=True)
             reset_num_timesteps = True
-        model.training_semantics = TRAINING_SEMANTICS
+        model.training_semantics = training_semantics(config)
         check_continuation(model, config)
         buffer = model.rollout_buffer
         if (not isinstance(buffer, VariableDiscountBuffer)
@@ -370,6 +390,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
             "source_steps": source_steps,
             "reset_value_head": reset_value_head,
             "training_semantics": model.training_semantics,
+            "allow_saving": config.allow_saving,
             "initial_steps": int(model.num_timesteps),
             "requested_steps": int(steps),
             "seed": seed,
@@ -443,7 +464,8 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None, deterministic=False):
              "valid_deployments": 0, "cards_available": {}, "cards_selected": {}}
     for opponent_index, opponent in enumerate(opponents):
         name = getattr(opponent, "__name__", type(opponent).__name__)
-        base = CREnv(opponent_model=opponent)
+        base = CREnv(opponent_model=opponent,
+                     allow_saving=getattr(model.policy, "allow_saving", False))
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(base)
         env = LegalPlacement(EpisodeReflection(base, seed=seed))
@@ -464,7 +486,8 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None, deterministic=False):
                     action, _ = model.predict(obs, deterministic=deterministic)
                     slot, y, x = map(int, np.asarray(action).reshape(-1)[:3])
                     decisions += 1
-                    if slot:
+                    saving = bool(slot and base.allow_saving and not legal[slot - 1].any())
+                    if slot and not saving:
                         deployments += 1
                         card = entity_names[int(hand[slot - 1])]
                         selected[card] = selected.get(card, 0) + 1
@@ -473,7 +496,7 @@ def evaluate(checkpoint, games=20, seed=0, opponents=None, deterministic=False):
                         after = tuple(env.unwrapped.battle.players[0].cycle)
                         valid += before != after
                     else:
-                        obs, _, terminated, truncated, _ = env.step((0, 0, 0))
+                        obs, _, terminated, truncated, _ = env.step((slot, y, x))
                     done = terminated or truncated
                 winner = env.unwrapped.battle.winner
                 if winner not in (0, 1):

@@ -7,3 +7,5 @@ runs/
 *.xml
 *.iml
 archive/
+experiment_*/
+evaluation_*/

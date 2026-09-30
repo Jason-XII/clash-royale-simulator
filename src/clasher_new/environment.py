@@ -31,9 +31,28 @@ card_types = ['troop', 'character', 'spell', 'building']
 speed_types = [0, 0.75, 1.0, 1.5]
 
 
+class CardSaving:
+    """An unaffordable card means wait, then redecide without deploying it."""
+
+    def __init__(self):
+        self.card = None
+
+    def waiting(self, player):
+        if self.card is not None and player.can_play_card(self.card):
+            self.card = None
+        return self.card is not None
+
+    def resolve(self, player, action):
+        slot = int(action[0])
+        if slot and not player.can_play_card(player.cycle[slot - 1]):
+            self.card = player.cycle[slot - 1]
+            return (0, 0, 0)
+        return action
+
+
 class CREnv(gym.Env):
     def __init__(self, opponent_model=None, opponent_pool=None, visualize=False,
-                 speed=1.0, discount_gamma=0.997):
+                 speed=1.0, discount_gamma=0.997, allow_saving=False):
         super().__init__()
         if not 0 < discount_gamma <= 1:
             raise ValueError("discount_gamma must be in (0, 1]")
@@ -42,6 +61,8 @@ class CREnv(gym.Env):
         self.battle: battle.BattleState = None
         self.speed = speed
         self.discount_gamma = float(discount_gamma)
+        self.allow_saving = bool(allow_saving)
+        self.saving = CardSaving()
         self.observation_space = gym.spaces.Dict({
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8, 32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
@@ -59,6 +80,7 @@ class CREnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
+        self.saving = CardSaving()
         decks = [self.np_random.permutation(cards).tolist() for cards in INITIAL_DECKS]
         opponent_seed = int(self.np_random.integers(2**32))
         self.opponent_random = random.Random(opponent_seed)
@@ -107,11 +129,16 @@ class CREnv(gym.Env):
 
 
     def step(self, action):
+        p0 = self.battle.players[0]
+        saving_card = None
+        if getattr(self, "allow_saving", False):
+            action = self.saving.resolve(p0, action)
+            saving_card = self.saving.card
         observation, reward, terminated, truncated, info = self._step_once(action)
         elapsed_seconds = info["elapsed_seconds"]
-        p0 = self.battle.players[0]
-        while not (terminated or truncated) and not any(
-            p0.can_play_card(card) for card in p0.cycle[:4]
+        while not (terminated or truncated) and (
+            (saving_card is not None and self.saving.waiting(p0))
+            or not any(p0.can_play_card(card) for card in p0.cycle[:4])
         ):
             observation, next_reward, terminated, truncated, next_info = self._step_once((0, 0, 0))
             reward += self.discount_gamma ** (elapsed_seconds / 0.5) * next_reward
@@ -120,6 +147,8 @@ class CREnv(gym.Env):
         info["elapsed_seconds"] = elapsed_seconds
         info["discount_steps"] = discount_steps
         info["transition_discount"] = self.discount_gamma ** discount_steps
+        if saving_card is not None:
+            info["saving_card"] = saving_card
         return observation, reward, terminated, truncated, info
 
     def _step_once(self, action):

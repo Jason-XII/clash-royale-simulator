@@ -40,6 +40,10 @@ class LegalPlacement(ObservationWrapper):
 class MaskedSpatialPolicy(SpatialPlacementPolicy):
     """Use the same action mask for sampling, log probability and entropy."""
 
+    def __init__(self, *args, allow_saving=False, **kwargs):
+        self.allow_saving = bool(allow_saving)
+        super().__init__(*args, **kwargs)
+
     def _latents(self, obs):
         global_and_map, latent_vf = super()._latents(obs)
         # Carry the mask and hand IDs with their corresponding latent batch.
@@ -49,6 +53,8 @@ class MaskedSpatialPolicy(SpatialPlacementPolicy):
 
     def _card_distribution(self, latent_pi, obs):
         distribution, hand = super()._card_distribution(latent_pi, obs)
+        if self.allow_saving:
+            return distribution, hand
         legal_cards = obs["legal_mask"].flatten(2).bool().any(dim=2)
         logits = distribution.logits.clone()
         logits[:, 1:] = logits[:, 1:].masked_fill(~legal_cards, -1e9)
@@ -62,8 +68,8 @@ class MaskedSpatialPolicy(SpatialPlacementPolicy):
         slot = (hand == selected_card[:, None]).long().argmax(dim=1)
         tiles = all_tiles[torch.arange(len(slot), device=slot.device), slot].clone()
         empty = ~tiles.any(dim=1)
-        # WAIT and unavailable branches need a finite placeholder only for PPO
-        # entropy/log-probability calculations. They have zero play probability.
+        # WAIT, saving and unavailable branches have no placement decision.
+        # The single placeholder contributes zero spatial log-probability/entropy.
         tiles[empty, 0] = True
         return Categorical(logits=distribution.logits.masked_fill(~tiles, -1e9))
 
@@ -71,26 +77,33 @@ class MaskedSpatialPolicy(SpatialPlacementPolicy):
         # Balanced entropy objective from the parent, with simulator
         # actionability replacing float32 elixir comparisons.
         conditional = Categorical(logits=card_dist.logits[:, 1:])
-        count = obs["legal_mask"].flatten(2).bool().any(dim=2).sum(dim=1)
+        legal = obs["legal_mask"].flatten(2).bool().any(dim=2)
+        count = legal.sum(dim=1)
+        choice_count = torch.full_like(count, 4) if self.allow_saving else count
         wait_play = Categorical(logits=torch.stack((
             card_dist.logits[:, 0],
             torch.logsumexp(card_dist.logits[:, 1:], dim=1),
         ), dim=1))
-        wait_play_eligible = count >= 1
+        wait_play_eligible = choice_count >= 1
         wait_play_scale = (
             wait_play_eligible.numel() / wait_play_eligible.sum().clamp(min=1)
         )
         wait_play_entropy = (wait_play.entropy() / np.log(2)
                              * wait_play_eligible.float() * wait_play_scale)
-        card_eligible = count >= 2
+        card_eligible = choice_count >= 2
         card_scale = card_eligible.numel() / card_eligible.sum().clamp(min=1)
         card_entropy = (conditional.entropy() / np.log(4)
                         * card_eligible.float() * card_scale)
         placement_entropy = torch.zeros_like(card_entropy)
+        raw_placement_entropy = torch.zeros_like(card_entropy)
+        # Keep the placement bonus conditional on actual deployment, so saving
+        # cannot reduce it merely by taking probability away from play.
+        placement_weights = (Categorical(logits=card_dist.logits[:, 1:].masked_fill(
+            ~legal, -1e9)).probs if self.allow_saving else conditional.probs)
         for slot in range(4):
             placement = self._placement_distribution(latent_pi, hand[:, slot])
-            placement_entropy += conditional.probs[:, slot] * placement.entropy()
-        raw_placement_entropy = placement_entropy
+            placement_entropy += placement_weights[:, slot] * placement.entropy()
+            raw_placement_entropy += conditional.probs[:, slot] * placement.entropy()
         place_eligible = count >= 1
         place_scale = place_eligible.numel() / place_eligible.sum().clamp(min=1)
         placement_entropy = (placement_entropy / np.log(576)
