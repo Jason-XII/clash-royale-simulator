@@ -5,6 +5,7 @@ from card_mechanics import *
 from card_utils import Card, TimedExplosiveData, spells, buildings
 import math
 from itertools import combinations
+from arena import is_walkable
 
 
 class Entity:
@@ -726,12 +727,12 @@ class BattleState:
                 minimum_distance = math.sqrt((pos.x-m[0])**2+(pos.y-m[1])**2)-m[2]
                 self.building_cache[x_cell][y_cell] = minimum_distance
     def pathfind_ground_walkable(self, position, mover_radius):
-        if not self.arena.is_walkable(position): return False
+        if not is_walkable(position): return False
         x, y = position_to_cell(position)
         return self.building_cache[x][y] > mover_radius
 
     def ground_walkable(self, position, mover_radius):
-        if not self.arena.is_walkable(position): return False
+        if not is_walkable(position): return False
         return not self.is_position_occupied_by_building(position, mover_radius)
 
     def is_position_occupied_by_building(self, position, mover_radius: float = 0.5) -> bool:
