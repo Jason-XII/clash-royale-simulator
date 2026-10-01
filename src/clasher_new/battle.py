@@ -131,7 +131,11 @@ class Entity:
         return self.position.distance_to(target.position) <= self.data.sight_range + target.data.collision_radius + bonus
 
     def get_nearest_target(self):
-        """Find nearest valid target with priority rules"""
+        """
+        Find nearest valid target with priority rules. This basically determines pathfinding and attacking logic.
+        When there is no target in sight, the troop sets the target to the nearest enemy tower.
+        When an enemy comes to sight, the troop switches to that target and doesn't stop attacking unless interrupted
+        """
         building_targets = []
         troop_targets = []
 
@@ -510,7 +514,7 @@ class TimedExplosive(Entity):
                     entity.take_damage(self.dsd.damage)
         self.is_alive = False
 
-    def take_damage(self, amount: float):
+    def take_damage(self, *args, **kwargs):
         # Bombs does not take damage!
         pass
 
@@ -541,12 +545,12 @@ class BattleState:
         self.next_entity_id = 1
         self.regen = 2.8
 
-        self._spawn_entity(Building(1, self.arena.RED_LEFT_TOWER, 1, 'King_PrincessTowers', True))
-        self._spawn_entity(Building(2, self.arena.RED_RIGHT_TOWER, 1, 'King_PrincessTowers', True))
-        self._spawn_entity(Building(3, self.arena.BLUE_LEFT_TOWER, 0, 'King_PrincessTowers', True))
-        self._spawn_entity(Building(4, self.arena.BLUE_RIGHT_TOWER, 0, 'King_PrincessTowers', True))
-        self._spawn_entity(Building(5, self.arena.RED_KING_TOWER, 1, 'KingTower', True))
-        self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', True))
+        self._spawn_entity(Building(1, self.arena.RED_LEFT_TOWER, 1, 'King_PrincessTowers', self, True))
+        self._spawn_entity(Building(2, self.arena.RED_RIGHT_TOWER, 1, 'King_PrincessTowers', self, True))
+        self._spawn_entity(Building(3, self.arena.BLUE_LEFT_TOWER, 0, 'King_PrincessTowers', self, True))
+        self._spawn_entity(Building(4, self.arena.BLUE_RIGHT_TOWER, 0, 'King_PrincessTowers', self, True))
+        self._spawn_entity(Building(5, self.arena.RED_KING_TOWER, 1, 'KingTower', self, True))
+        self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', self, True))
 
         self.schedule = []
         self.building_positions = []
@@ -753,7 +757,7 @@ class BattleState:
                     overlap = e1.data.collision_radius + e2.data.collision_radius - e1.position.distance_to(e2.position)
                     # the direction vector points from e1 to e2
                     direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
-                    if abs(direction_vector) == 0: return
+                    if abs(direction_vector) == 0: continue
                     direction_vector /= abs(direction_vector)
                     movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
                     e2.position.x += direction_vector.real*movement_ratio*overlap

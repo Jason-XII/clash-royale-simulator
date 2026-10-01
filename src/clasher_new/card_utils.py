@@ -69,7 +69,7 @@ class Card:
         self.collision_radius = self.data['summonCharacterData'].get('collisionRadius', 1000) / 1000
         self.hit_speed = self.data['summonCharacterData'].get('hitSpeed', 0) / 1000
         self.load_time = self.data['summonCharacterData'].get('loadTime', 0) / 1000
-        self.speed = self.data['summonCharacterData'].get('speed', 0)/50
+        self.speed = self.data['summonCharacterData'].get('speed', 0) / 50
         self.target_only_buildings = self.data['summonCharacterData'].get('tidTarget', '') == "TID_TARGETS_BUILDINGS"
         self.is_air_unit = self.name in air_units or self.data['summonCharacterData'].get('name', '') in air_units
         self.attack_air = 'AIR' in self.data['summonCharacterData'].get("tidTarget", '')
@@ -94,7 +94,7 @@ class Card:
         self.death_damage = self.data['summonCharacterData'].get('deathDamage', 0)
 
         self.jump_height = self.data['summonCharacterData'].get('jumpHeight', 0)
-        self.jump_speed = self.data['summonCharacterData'].get('jumpSpeed', 0) / 60
+        self.jump_speed = self.data['summonCharacterData'].get('jumpSpeed', 0) / 50
 
         self.spawn_data = self.data['summonCharacterData'].get("spawnAreaObjectData", {})
         self.kamikaze = self.data['summonCharacterData'].get('kamikaze', False)
@@ -135,7 +135,7 @@ class Projectile:
     def __init__(self, projectile_data):
         self.data = projectile_data
         self.damage = self.data.get('damage', 0)
-        self.speed = self.data.get('speed', 0) / 60
+        self.speed = self.data.get('speed', 0) / 50
         self.radius = (self.data.get('spawnProjectileData', {}).get('radius', 0) or self.data.get('radius', 0)) / 1000
         self.target_buff = self.data.get('targetBuffData', {})
         self.buff_time = self.data.get('buffTime', 0) / 1000
