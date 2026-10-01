@@ -31,3 +31,6 @@ class TileGrid:
     RED_KING_TOWER = Position(9.0, 29.0)
     RED_LEFT_TOWER = Position(3.5, 25.5)
     RED_RIGHT_TOWER = Position(14.5, 25.5)
+    RIVER_TILES = {(0, 15), (0, 16), (1, 15), (1, 16),
+                   *[(i, j) for i in range(5, 13) for j in range(15, 17)],  # (5, 15) to (12, 16)
+                   (16, 15), (16, 16), (17, 15), (17, 16)}

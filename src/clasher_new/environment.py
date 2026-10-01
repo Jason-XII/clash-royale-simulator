@@ -25,6 +25,8 @@ entity_names = ['None', 'Knight', 'MiniPekka', 'Arrows', 'Minions', 'Archer',
                 'KingTower', 'ArrowsSpell', 'FireballSpell']
 # 'troop' is the towers' type ("tower troop"); actual troops are 'character'.
 card_types = ['troop', 'character', 'spell', 'building']
+ENTITY_ID = {name: i for i, name in enumerate(entity_names)}
+CARD_TYPE_ID = {name: i for i, name in enumerate(card_types)}
 
 FRAMES = 8            # observation history length, one frame per half second
 DECISION_SECONDS = 0.5
@@ -79,6 +81,7 @@ class CREnv(gym.Env):
         self.visualize = visualize
         self.visualizer = None
         self.history = {0: [], 1: []}
+        self.tile_cache = {}  # legal troop tiles, see legal_mask
         self.fps = 20
 
     def reset(self, *, seed=None, options=None):
@@ -122,8 +125,14 @@ class CREnv(gym.Env):
         playable = [player.can_play_card(card) for card in player.cycle[:4]]
         if not any(playable):
             return mask
-        tiles = np.array([[self.battle.can_place_troop(player_id, to_world(player_id, y, x))
-                           for x in range(18)] for y in range(32)], dtype=np.int8)
+        # can_place_troop depends only on these, so reuse the tiles until one changes.
+        enemy = self.battle.players[1 - player_id]
+        key = (player_id, enemy.left_tower_hp > 0, enemy.right_tower_hp > 0,
+               tuple(self.battle.building_positions))
+        if key not in self.tile_cache:
+            self.tile_cache[key] = np.array([[self.battle.can_place_troop(player_id, to_world(player_id, y, x))
+                                              for x in range(18)] for y in range(32)], dtype=np.int8)
+        tiles = self.tile_cache[key]
         for slot, card in enumerate(player.cycle[:4]):
             if playable[slot]:
                 mask[slot] = 1 if Card(card).type == "spell" else tiles
@@ -136,9 +145,12 @@ class CREnv(gym.Env):
             self.battle.deploy_card(player_id, card, to_world(player_id, y, x))
 
     def opponent_action(self):
-        """Player 1's action, decided from the same moment player 0 decided from."""
-        with self._opponent_rng():
-            return self.opponent(self.opponent_observation)
+        """Player 1's action, decided from the same moment player 0 decided from.
+
+        Not RNG-isolated (only reset() is): current opponents draw global
+        randomness only in reset(). Wrap this in _opponent_rng() for one that doesn't.
+        """
+        return self.opponent(self.opponent_observation)
 
     def step(self, action):
         """One decision. Skips ahead (and sums discounted rewards) while no card is
@@ -205,17 +217,17 @@ class CREnv(gym.Env):
         """Append the current frame to `player_id`'s history and return its observation."""
         frame = np.zeros((32, 18, 15), dtype=np.float32)
         for entity in self.battle.entities.values():
-            if not entity.is_alive or entity.name not in entity_names:
+            if not entity.is_alive or entity.name not in ENTITY_ID:
                 continue
             data = entity.data
             # Clip: collisions can push a unit to exactly x=18 or y=32.
-            x = int(np.clip(entity.position.x, 0, 17))
-            y = int(np.clip(entity.position.y, 0, 31))
+            x = int(min(max(entity.position.x, 0), 17))
+            y = int(min(max(entity.position.y, 0), 31))
             if player_id == 1:
                 x, y = 17 - x, 31 - y
             # ponytail: one entity per tile; later entities overwrite earlier ones.
             frame[y][x] = np.array([
-                entity_names.index(entity.name), card_types.index(data.type),
+                ENTITY_ID[entity.name], CARD_TYPE_ID[data.type],
                 entity.player != player_id,  # 0 = own, 1 = enemy
                 data.elixir, data.speed, int(data.is_air_unit),
                 int(data.attack_ground), int(data.attack_air),
@@ -236,7 +248,7 @@ class CREnv(gym.Env):
         phase_end = next(end for end in (120, 180, 240, 300) if now < end or end == 300)
         return {
             'grid': np.stack(history),
-            'hand': np.array([entity_names.index(card) for card in self.battle.players[player_id].cycle[:5]],
+            'hand': np.array([ENTITY_ID[card] for card in self.battle.players[player_id].cycle[:5]],
                              dtype=np.int32),
             'elixir': np.array([self.battle.players[player_id].elixir], dtype=np.float32),
             'phase': (120, 180, 240, 300).index(phase_end),

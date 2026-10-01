@@ -558,10 +558,7 @@ class BattleState:
         self.cache_fresh = False
 
     def in_river(self, position):
-        river_tiles = [(0, 15), (0, 16), (1, 15), (1, 16),
-            *[(i, j) for i in range(5, 13) for j in range(15, 17)], # (5, 15) to (12, 16)
-            (16, 15), (16, 16), (17, 15), (17, 16)]
-        return (int(position.x), int(position.y)) in river_tiles
+        return (int(position.x), int(position.y)) in TileGrid.RIVER_TILES
 
     def ensure_walkability(self, entity):
         if entity.jumping_across_river and self.in_river(entity.position): return
