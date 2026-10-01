@@ -553,7 +553,7 @@ class BattleState:
         self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', self, True))
 
         self.schedule = []
-        self.building_positions = []
+        self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building) and entity.is_alive]
         self.building_cache = None
         self.cache_fresh = False
 
@@ -652,7 +652,7 @@ class BattleState:
         for each in self.players:
             each.regenerate_elixir(dt, 2.8 if self.time < 120 else 1.4 if self.time < 240 else 2.8/3)
         self.entities = {key:value for key,value in self.entities.items() if (value.is_alive or key <= 6)}
-        self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building)]
+        self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building) and entity.is_alive]
         if not self.cache_fresh:
             self.calculate_building_cache()
             self.cache_fresh = True

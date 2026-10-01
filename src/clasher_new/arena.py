@@ -12,12 +12,13 @@ def is_blocked_tile(x: int, y: int) -> bool:
         return x <= 5 or x >= 12
     return False
 
-walkable_cells = []
+walkable_cells = set()
 for x in range(0, 18):
     for y in range(0, 32):
         if is_valid_position(Position(x, y)) and not is_blocked_tile(x, y):
-            walkable_cells.append((x, y))
+            walkable_cells.add((x, y))
 def is_walkable(pos):
+    if pos.x < 0 or pos.y < 0: return False
     x, y = int(pos.x), int(pos.y)
     return (x, y) in walkable_cells
 
