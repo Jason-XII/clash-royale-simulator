@@ -5,11 +5,15 @@ import time
 
 import numpy as np
 
-from environment import CREnv, random_strategy
+from environment import CREnv
 
 
 GAMES = 10
 SEED = 0
+
+
+def random_strategy(observation):
+    return random.randint(0, 4), random.randint(0, 31), random.randint(0, 17)
 
 
 def main():

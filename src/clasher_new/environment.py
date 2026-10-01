@@ -1,38 +1,44 @@
-import battle, player
-from core import Position
+"""Gymnasium environment: player 0 is the learner, player 1 is `opponent_model`.
+
+Both players see the arena from their own side (own towers near y=0), so the same
+policy or script can play either side. Actions are (slot, y, x); slot 0 waits.
+"""
+from contextlib import contextmanager
+import random
+import time
 
 import gymnasium as gym
-from contextlib import contextmanager
-from random import randint
-import time
 import numpy as np
-import random
 
-from stable_baselines3.common.env_checker import check_env
+import battle
+import player
+from card_utils import Card
+from core import Position
 
 player_0_deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
 player_1_deck = ['Minions', 'Archer', 'MiniPekka', 'Musketeer', 'Giant', 'Fireball', 'Arrows', 'Knight']
 INITIAL_DECKS = (tuple(player_0_deck), tuple(player_1_deck))
 
-b = battle.BattleState(player.PlayerState(0, player_0_deck, 10),
-                       player.PlayerState(1, player_1_deck, 10))
-
-deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
-
+# Index 0 means an empty tile. Spells appear on the board as their projectiles.
 entity_names = ['None', 'Knight', 'MiniPekka', 'Arrows', 'Minions', 'Archer',
                 'Musketeer', 'Fireball', 'Giant', 'King_PrincessTowers',
                 'KingTower', 'ArrowsSpell', 'FireballSpell']
-# The agent has to learn that it can only deploy fireball and arrows, and the entities that actually appear are
-# the arrows/fireball+spells thingy.
-
+# 'troop' is the towers' type ("tower troop"); actual troops are 'character'.
 card_types = ['troop', 'character', 'spell', 'building']
-# Troop mean princess tower, short for tower troop.
-# Actual troops are represented as "characters".
-speed_types = [0, 0.75, 1.0, 1.5]
+
+FRAMES = 8            # observation history length, one frame per half second
+DECISION_SECONDS = 0.5
+
+
+def to_world(player_id, y, x):
+    """Center of tile (y, x) in `player_id`'s own view, in arena coordinates."""
+    if player_id == 0:
+        return Position(x + 0.5, y + 0.5)
+    return Position(18 - (x + 0.5), 32 - (y + 0.5))
 
 
 class CardSaving:
-    """An unaffordable card means wait, then redecide without deploying it."""
+    """Choosing an unaffordable card waits until it is affordable, then redecides."""
 
     def __init__(self):
         self.card = None
@@ -51,30 +57,27 @@ class CardSaving:
 
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, opponent_pool=None, visualize=False,
-                 speed=1.0, discount_gamma=0.997, allow_saving=False):
+    def __init__(self, opponent_model=None, visualize=False, speed=1.0,
+                 discount_gamma=0.997, allow_saving=False):
         super().__init__()
         if not 0 < discount_gamma <= 1:
             raise ValueError("discount_gamma must be in (0, 1]")
         self.opponent = opponent_model
-        self.opponent_pool = opponent_pool
         self.battle: battle.BattleState = None
         self.speed = speed
         self.discount_gamma = float(discount_gamma)
         self.allow_saving = bool(allow_saving)
         self.saving = CardSaving()
         self.observation_space = gym.spaces.Dict({
-            "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8, 32, 18, 15), dtype=np.float32),
+            "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(FRAMES, 32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "phase": gym.spaces.Discrete(4),
             "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
         })
         self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
-
         self.visualize = visualize
         self.visualizer = None
-
         self.history = {0: [], 1: []}
         self.fps = 20
 
@@ -85,21 +88,17 @@ class CREnv(gym.Env):
         opponent_seed = int(self.np_random.integers(2**32))
         self.opponent_random = random.Random(opponent_seed)
         self.opponent_numpy = np.random.RandomState(opponent_seed)
-        if self.opponent_pool:
-            self.opponent = self.opponent_pool[int(self.np_random.integers(len(self.opponent_pool)))]
         if callable(getattr(self.opponent, 'reset', None)):
             with self._opponent_rng():
                 self.opponent.reset()
         self.battle = battle.BattleState(player.PlayerState(0, decks[0], 5.0),
-                       player.PlayerState(1, decks[1], 5.0))
+                                         player.PlayerState(1, decks[1], 5.0))
         if self.visualize:
             from new_visualization import Visualizer
             self.visualizer = Visualizer(self.battle)
-        # Now return initial observation
         self.history = {0: [], 1: []}
         observation = self.observe(0)
-        # Seed both frame stacks from the same initial battle state.
-        self.observe(1)
+        self.opponent_observation = self.observe(1)
         return observation, {}
 
     @contextmanager
@@ -116,169 +115,130 @@ class CREnv(gym.Env):
             random.setstate(python_state)
             np.random.set_state(numpy_state)
 
-    def opponent_action(self):
-        obs1 = self.observe(1)
-        with self._opponent_rng():
-            opponent_action = self.opponent(obs1)
-        slot, y, x = opponent_action
-        p1 = self.battle.players[1]
-        if slot != 0:
-            card_name = p1.cycle[slot - 1]
-            self.battle.deploy_card(1, card_name, Position(18-(x+0.5), 32-(y+0.5)))
-            # Yes, this transformation seems weird, but it should be correct
+    def legal_mask(self, player_id):
+        """(4, 32, 18) mask of legal deployments, in `player_id`'s own view."""
+        player = self.battle.players[player_id]
+        mask = np.zeros((4, 32, 18), dtype=np.int8)
+        playable = [player.can_play_card(card) for card in player.cycle[:4]]
+        if not any(playable):
+            return mask
+        tiles = np.array([[self.battle.can_place_troop(player_id, to_world(player_id, y, x))
+                           for x in range(18)] for y in range(32)], dtype=np.int8)
+        for slot, card in enumerate(player.cycle[:4]):
+            if playable[slot]:
+                mask[slot] = 1 if Card(card).type == "spell" else tiles
+        return mask
 
+    def _deploy(self, player_id, action):
+        slot, y, x = action
+        if slot:
+            card = self.battle.players[player_id].cycle[slot - 1]
+            self.battle.deploy_card(player_id, card, to_world(player_id, y, x))
+
+    def opponent_action(self):
+        """Player 1's action, decided from the same moment player 0 decided from."""
+        with self._opponent_rng():
+            return self.opponent(self.opponent_observation)
 
     def step(self, action):
+        """One decision. Skips ahead (and sums discounted rewards) while no card is
+        playable, or while a saved card is still unaffordable."""
         p0 = self.battle.players[0]
         saving_card = None
-        if getattr(self, "allow_saving", False):
+        if self.allow_saving:
             action = self.saving.resolve(p0, action)
             saving_card = self.saving.card
-        observation, reward, terminated, truncated, info = self._step_once(action)
-        elapsed_seconds = info["elapsed_seconds"]
-        while not (terminated or truncated) and (
-            (saving_card is not None and self.saving.waiting(p0))
-            or not any(p0.can_play_card(card) for card in p0.cycle[:4])
-        ):
-            observation, next_reward, terminated, truncated, next_info = self._step_once((0, 0, 0))
-            reward += self.discount_gamma ** (elapsed_seconds / 0.5) * next_reward
-            elapsed_seconds += next_info["elapsed_seconds"]
-        discount_steps = elapsed_seconds / 0.5
-        info["elapsed_seconds"] = elapsed_seconds
-        info["discount_steps"] = discount_steps
-        info["transition_discount"] = self.discount_gamma ** discount_steps
+        observation, reward, done, _, info = self._step_once(action)
+        elapsed = info["elapsed_seconds"]
+        while not done and ((saving_card is not None and self.saving.waiting(p0))
+                            or not any(p0.can_play_card(card) for card in p0.cycle[:4])):
+            observation, next_reward, done, _, next_info = self._step_once((0, 0, 0))
+            reward += self.discount_gamma ** (elapsed / DECISION_SECONDS) * next_reward
+            elapsed += next_info["elapsed_seconds"]
+        info["elapsed_seconds"] = elapsed
+        info["discount_steps"] = elapsed / DECISION_SECONDS
+        info["transition_discount"] = self.discount_gamma ** info["discount_steps"]
         if saving_card is not None:
             info["saving_card"] = saving_card
-        return observation, reward, terminated, truncated, info
+        return observation, reward, done, done, info
+
+    def _potential(self):
+        """Shaping potential: 2 per tower advantage plus 0.0001 per HP advantage."""
+        p0, p1 = self.battle.players
+        towers = (3 - p0.get_crown_count()) - (3 - p1.get_crown_count())
+        hp = (p0.king_tower_hp + p0.left_tower_hp + p0.right_tower_hp) \
+            - (p1.king_tower_hp + p1.left_tower_hp + p1.right_tower_hp)
+        return 2 * towers + 0.0001 * hp
 
     def _step_once(self, action):
-        """
-        The action is a tuple with three values: (slot, y, x). When slot=0, no action is performed. Else deploy card on
-        slot to the corresponding position on the arena.
-        Advance half a second. Reward combines the game outcome with
-        elapsed-time potential shaping from tower count and HP advantage.
-        The opponent is a function that takes in the observation and outputs the action tuple.
-        """
+        """Apply both players' actions and simulate half a second.
 
-        p0, p1 = self.battle.players
+        Both players decide before either deployment lands, so neither can react
+        to the other's card within the same step.
+        Reward is outcome (+/-10) plus potential shaping with an elapsed-time
+        discount; the terminal potential is zero.
+        """
         time_before = self.battle.time
-        blue_hps_old = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
-        red_hps_old = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
-        blue_left = 3-p0.get_crown_count()
-        red_left = 3-p1.get_crown_count()
-
-        slot, y, x = action
-        if slot != 0:
-            card_name = p0.cycle[slot-1]
-            self.battle.deploy_card(0, card_name, Position(x+0.5, y+0.5))
-
-        self.opponent_action()
-        # only make decisions per half second
-        for i in range(self.fps//2):
+        potential_before = self._potential()
+        opponent_action = self.opponent_action()
+        self._deploy(0, action)
+        self._deploy(1, opponent_action)
+        for _ in range(int(self.fps * DECISION_SECONDS)):
             if self.battle.game_over:
                 break
-            for j in range(int(self.speed)):
-                self.battle.step(1/self.fps)
+            for _ in range(int(self.speed)):
+                self.battle.step(1 / self.fps)
             if self.visualizer:
                 self.visualizer.render_frame()
-                time.sleep(1/self.fps)
-        blue_hps_new = p0.king_tower_hp+p0.left_tower_hp+p0.right_tower_hp
-        red_hps_new = p1.king_tower_hp+p1.left_tower_hp+p1.right_tower_hp
-        blue_left_new = 3-p0.get_crown_count()
-        red_left_new = 3-p1.get_crown_count()
-
-        potential_before = (
-            2 * (blue_left - red_left)
-            + 0.0001 * (blue_hps_old - red_hps_old)
-        )
-        potential_after = (
-            2 * (blue_left_new - red_left_new)
-            + 0.0001 * (blue_hps_new - red_hps_new)
-        )
+                time.sleep(1 / self.fps)
         elapsed = self.battle.time - time_before
-        discount = self.discount_gamma ** (elapsed / 0.5)
-        if self.battle.game_over:
-            potential_after = 0.0
-
-        reward = discount * potential_after - potential_before
-        if self.battle.game_over:
+        done = self.battle.game_over
+        potential_after = 0.0 if done else self._potential()
+        reward = self.discount_gamma ** (elapsed / DECISION_SECONDS) * potential_after - potential_before
+        if done:
             reward += 10 if self.battle.winner == 0 else -10
-        return self.observe(0), reward, self.battle.game_over, self.battle.game_over, {
-            "elapsed_seconds": self.battle.time - time_before,
-        }
+        observation = self.observe(0)
+        self.opponent_observation = self.observe(1)
+        return observation, reward, done, done, {"elapsed_seconds": elapsed}
 
+    def observe(self, player_id=0):
+        """Append the current frame to `player_id`'s history and return its observation."""
+        frame = np.zeros((32, 18, 15), dtype=np.float32)
+        for entity in self.battle.entities.values():
+            if not entity.is_alive or entity.name not in entity_names:
+                continue
+            data = entity.data
+            # Clip: collisions can push a unit to exactly x=18 or y=32.
+            x = int(np.clip(entity.position.x, 0, 17))
+            y = int(np.clip(entity.position.y, 0, 31))
+            if player_id == 1:
+                x, y = 17 - x, 31 - y
+            # ponytail: one entity per tile; later entities overwrite earlier ones.
+            frame[y][x] = np.array([
+                entity_names.index(entity.name), card_types.index(data.type),
+                entity.player != player_id,  # 0 = own, 1 = enemy
+                data.elixir, data.speed, int(data.is_air_unit),
+                int(data.attack_ground), int(data.attack_air),
+                np.log(entity.hp) / 10 if entity.hp != 0 else 0,
+                entity.hp / data.hp if data.hp != 0 else 0,
+                data.hit_speed, data.range / 3, data.sight_range / 3,
+                data.damage / 200, data.projectile_data.damage / 200,
+            ])
 
-    def observe(self, player_id_observe=0):
-        """Gives a representation of game state"""
-        obs = np.zeros((32, 18, 15), dtype=np.float32)
-        for id, each in self.battle.entities.items():
-            if not each.is_alive: continue
-            if each.name not in entity_names: continue
-            entity_id = entity_names.index(each.name)
-            card_type = card_types.index(each.data.type)
-            player_id = each.player != player_id_observe # This way, own troops are always labeled as 0
-            elixir = each.data.elixir
-            is_air = int(each.data.is_air_unit)
-            attacks_ground, attacks_air = int(each.data.attack_ground), int(each.data.attack_air)
-
-            speed = each.data.speed
-            hp_left = np.log(each.hp) / 10 if each.hp != 0 else 0
-            hp_percentage = each.hp / each.data.hp if each.data.hp != 0 else 0
-            hit_speed = each.data.hit_speed
-            attack_range = each.data.range / 3
-            sight_range = each.data.sight_range / 3
-            damage = each.data.damage / 200
-            projectile_damage = each.data.projectile_data.damage / 200
-
-            x = int(np.clip(each.position.x, 0, 17))
-            y = int(np.clip(each.position.y, 0, 31))
-
-            if player_id_observe == 1:
-                x = 17 - x
-                y = 31 - y
-            # sometimes, because of collision issues, x might be exactly 18 for player 0, which breaks the code
-            # so it needs to be clipped
-
-            obs_arr = np.array([entity_id, card_type, player_id, elixir, speed, is_air, attacks_ground, attacks_air,
-                                hp_left, hp_percentage, hit_speed, attack_range, sight_range, damage, projectile_damage])
-            obs[y][x] = obs_arr.copy()
-
-        hand = np.array([entity_names.index(each) for each in self.battle.players[player_id_observe].cycle[:5]],
-                        dtype=np.int32)
-        battle_time = self.battle.time
-        if battle_time < 120:
-            phase = 1
-            time_left = 120-battle_time
-        elif battle_time < 180:
-             phase = 2
-             time_left = 180 - battle_time
-        elif battle_time < 240:
-            phase = 3
-            time_left = 240 - battle_time
-        else:
-            phase = 4
-            time_left = 300 - battle_time
-        history = self.history[player_id_observe]
+        history = self.history[player_id]
         if not history:
-            history.extend(obs.copy() for _ in range(8))
-        history.append(obs)
-        if len(history) > 8:
+            history.extend(frame.copy() for _ in range(FRAMES))
+        history.append(frame)
+        if len(history) > FRAMES:
             history.pop(0)
+
+        now = self.battle.time
+        phase_end = next(end for end in (120, 180, 240, 300) if now < end or end == 300)
         return {
             'grid': np.stack(history),
-            'hand': hand,
-            'elixir': np.array([self.battle.players[player_id_observe].elixir], dtype=np.float32),
-            'phase': phase-1,
-            'time_till_next_phase': np.array([time_left/120.0], dtype=np.float32)
+            'hand': np.array([entity_names.index(card) for card in self.battle.players[player_id].cycle[:5]],
+                             dtype=np.int32),
+            'elixir': np.array([self.battle.players[player_id].elixir], dtype=np.float32),
+            'phase': (120, 180, 240, 300).index(phase_end),
+            'time_till_next_phase': np.array([(phase_end - now) / 120.0], dtype=np.float32),
         }
-
-
-def random_strategy(observation):
-    slot = randint(0, 4)
-    y = randint(0, 31)
-    x = randint(0, 17)
-    return slot, y, x
-
-if __name__ == '__main__':
-    env = CREnv(random_strategy, visualize=False)
-    check_env(env)

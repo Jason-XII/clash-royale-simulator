@@ -9,8 +9,6 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from card_utils import Card
-from core import Position
 from environment import CREnv, CardSaving, entity_names
 from strategies import DiverseOpponent
 from train_core import ReflectedOpponent
@@ -78,24 +76,6 @@ def make_schedule(games=50, seed=0, history=(), exploiters=(), references=(), ta
     return schedule
 
 
-def legal_mask(env, side):
-    player = env.battle.players[side]
-    mask = np.zeros((4, 32, 18), dtype=np.int8)
-    playable = [player.can_play_card(card) for card in player.cycle[:4]]
-    if not any(playable):
-        return mask
-    tiles = np.array([
-        [env.battle.can_place_troop(side, Position(
-            x + .5 if side == 0 else 17.5 - x,
-            y + .5 if side == 0 else 31.5 - y,
-        )) for x in range(18)] for y in range(32)
-    ], dtype=np.int8)
-    for slot, card in enumerate(player.cycle[:4]):
-        if playable[slot]:
-            mask[slot] = 1 if Card(card).type == "spell" else tiles
-    return mask
-
-
 class EvaluationActor:
     """An actor with its own sampling stream, independent of the other player."""
 
@@ -131,11 +111,9 @@ class EvaluationActor:
                 self.numpy_state = np.random.get_state()
 
     def __call__(self, observation):
-        mask = legal_mask(self.env, self.side)
+        mask = self.env.legal_mask(self.side)
         self.last_action = (0, 0, 0)
-        if self.saving.waiting(self.env.battle.players[self.side]):
-            return self.last_action
-        if not mask.any():
+        if self.saving.waiting(self.env.battle.players[self.side]) or not mask.any():
             return self.last_action
         self.decisions += 1
         for slot in range(4):

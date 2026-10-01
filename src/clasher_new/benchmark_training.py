@@ -88,7 +88,6 @@ def worker_factory(source, target, rank, seed):
             rank=rank,
             seed=seed,
             opponent_factory=opponent_factory,
-            reflect=True,
         )()
     return create
 
@@ -222,8 +221,7 @@ def main():
     source_files = (
         "train_core.py", "environment.py", "battle.py", "core.py",
         "player.py", "card_utils.py", "card_mechanics.py", "masked_spatial.py",
-        "spatial_policy.py", "train_autoregressive.py", "train.py",
-        "parallel_rollout.py", "strategies.py",
+        "parallel_rollout.py", "strategies.py", "defensive_strategy.py",
     )
     result = {
         "host": platform.node(),
