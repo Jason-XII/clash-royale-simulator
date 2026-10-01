@@ -59,10 +59,12 @@ class Card:
         self.hp = self.data['summonCharacterData'].get('hitpoints', 0)
         self.elixir = self.data.get('manaCost', 0) # princess towers don't have elixir cost
         self.name = self.data['name']
+        self.summon_character_name = self.data['summonCharacterData'].get('name', '')
         self.damage = self.data['summonCharacterData'].get('damage', 0)
         self.spawn_number = self.data.get('summonNumber', 1)
         self.spawn_delay = self.data.get('summonDeployDelay', 0) / 1000
         self.spawn_radius = self.data.get('summonRadius', 550) / 1000
+        self.mass = 0 if self.summon_character_name not in characters else characters[self.summon_character_name]['mass']
 
         self.area_damage_radius = self.data['summonCharacterData'].get('areaDamageRadius', 0) / 1000
         self.projectile_damage_radius = nested_idx(self.data, 'summonCharacterData', 'projectileData', 'spawnProjectileData', 'radius')
@@ -174,4 +176,4 @@ class AreaEffectData:
 if __name__ == '__main__':
     deck = ['Knight', 'MiniPekka', 'Arrows', 'Minions', 'Musketeer', 'Fireball', 'Giant', 'Archer']
     for each in deck:
-        print(Card(each).type)
+        print(Card(each).mass)

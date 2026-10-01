@@ -759,7 +759,7 @@ class BattleState:
                     direction_vector = complex(e2.position.x-e1.position.x, e2.position.y-e1.position.y)
                     if abs(direction_vector) == 0: continue
                     direction_vector /= abs(direction_vector)
-                    movement_ratio = e2.data.speed / (e1.data.speed+e2.data.speed)
+                    movement_ratio = e2.data.mass / (e1.data.mass+e2.data.mass)
                     e2.position.x += direction_vector.real*movement_ratio*overlap
                     e2.position.y += direction_vector.imag*movement_ratio*overlap
                     e1.position.x += -direction_vector.real * (1-movement_ratio)*overlap*0.5
