@@ -573,7 +573,7 @@ class BattleState:
             push_ratio = 0.5
             if y < push_ratio*r: y=push_ratio*r
             elif y > 32-push_ratio*r: y=32-push_ratio*r
-            if x < push_ratio*r: x=r
+            if x < push_ratio*r: x=push_ratio*r
             elif x > 18-push_ratio*r: x=18-push_ratio*r
             if 15-push_ratio*r < y < 17+push_ratio*r and not entity.data.is_air_unit:
                 y = 15-push_ratio*r if y-15 < 17-y else 17+push_ratio*r
@@ -700,6 +700,7 @@ class BattleState:
     def can_place_troop(self, player_id, position):
         """Deployment-area rule shared by the simulator and action mask."""
         if self.is_position_occupied_by_building(position, 0): return False
+        if self.in_river(position): return False
         if player_id == 0:
             if position.y <= 1.0 and (position.x <= 6.0 or position.x > 12.0): return False
             if position.y >= 21.0: return False
