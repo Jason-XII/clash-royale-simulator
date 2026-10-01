@@ -591,7 +591,6 @@ class BattleState:
         card_name = entity_data[3]
         entity_data = list(entity_data)
         entity_data[0] = self.next_entity_id
-        self.next_entity_id += 1
         if len(entity_data) == 7:
             return Projectile(*entity_data)
         if card_name in spells:
