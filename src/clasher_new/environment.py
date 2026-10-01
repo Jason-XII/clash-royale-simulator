@@ -1,7 +1,9 @@
 """Gymnasium environment: player 0 is the learner, player 1 is `opponent_model`.
 
 Both players see the arena from their own side (own towers near y=0), so the same
-policy or script can play either side. Actions are (slot, y, x); slot 0 waits.
+policy or script can play either side. Actions are (slot, y, x): slot 0 waits
+half a second, slots 1-4 play that hand card at tile (y, x), and the remaining
+slots bank elixir (see `Bank`).
 """
 from contextlib import contextmanager
 import random
@@ -29,6 +31,8 @@ ENTITY_ID = {name: i for i, name in enumerate(entity_names)}
 CARD_TYPE_ID = {name: i for i, name in enumerate(card_types)}
 
 FRAMES = 8            # observation history length, one frame per half second
+CARD_SLOTS = 4
+BANK_TARGETS = (4, 5, 6, 7, 8, 9, 10)  # slot 5 + i banks until elixir >= BANK_TARGETS[i]
 DECISION_SECONDS = 0.5
 
 
@@ -39,28 +43,43 @@ def to_world(player_id, y, x):
     return Position(18 - (x + 0.5), 32 - (y + 0.5))
 
 
-class CardSaving:
-    """Choosing an unaffordable card waits until it is affordable, then redecides."""
+class Bank:
+    """A bank action: keep waiting until elixir reaches the target.
+
+    Ends early when a new enemy troop crosses into this player's half, so the
+    player gets to respond. Enemies already there when banking began (the player
+    saw them when choosing to bank) do not interrupt it.
+    """
 
     def __init__(self):
-        self.card = None
+        self.target = None
 
-    def waiting(self, player):
-        if self.card is not None and player.can_play_card(self.card):
-            self.card = None
-        return self.card is not None
-
-    def resolve(self, player, action):
+    def resolve(self, state, player_id, action):
+        """Start banking if `action` is a bank action; return what to do right now."""
         slot = int(action[0])
-        if slot and not player.can_play_card(player.cycle[slot - 1]):
-            self.card = player.cycle[slot - 1]
-            return (0, 0, 0)
-        return action
+        if slot <= CARD_SLOTS:
+            return action
+        self.target, self.player_id = BANK_TARGETS[slot - CARD_SLOTS - 1], player_id
+        self.seen = self._intruders(state)
+        return (0, 0, 0)
+
+    def active(self, state):
+        """Whether to keep waiting. Clears itself once the bank ends."""
+        if self.target is not None and (state.players[self.player_id].elixir >= self.target
+                                        or not self._intruders(state) <= self.seen):
+            self.target = None
+        return self.target is not None
+
+    def _intruders(self, state):
+        """Ids of enemy troops in this player's half (y < 16 is player 0's half)."""
+        return {key for key, entity in state.entities.items()
+                if isinstance(entity, battle.Troop) and entity.is_alive
+                and entity.player != self.player_id
+                and (entity.position.y < 16) == (self.player_id == 0)}
 
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, visualize=False, speed=1.0,
-                 discount_gamma=0.997, allow_saving=False):
+    def __init__(self, opponent_model=None, visualize=False, speed=1.0, discount_gamma=0.997):
         super().__init__()
         if not 0 < discount_gamma <= 1:
             raise ValueError("discount_gamma must be in (0, 1]")
@@ -68,8 +87,7 @@ class CREnv(gym.Env):
         self.battle: battle.BattleState = None
         self.speed = speed
         self.discount_gamma = float(discount_gamma)
-        self.allow_saving = bool(allow_saving)
-        self.saving = CardSaving()
+        self.bank = Bank()
         self.observation_space = gym.spaces.Dict({
             "grid": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(FRAMES, 32, 18, 15), dtype=np.float32),
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
@@ -77,7 +95,7 @@ class CREnv(gym.Env):
             "phase": gym.spaces.Discrete(4),
             "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
         })
-        self.action_space = gym.spaces.MultiDiscrete([5, 32, 18])
+        self.action_space = gym.spaces.MultiDiscrete([1 + CARD_SLOTS + len(BANK_TARGETS), 32, 18])
         self.visualize = visualize
         self.visualizer = None
         self.history = {0: [], 1: []}
@@ -86,7 +104,7 @@ class CREnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
-        self.saving = CardSaving()
+        self.bank = Bank()
         decks = [self.np_random.permutation(cards).tolist() for cards in INITIAL_DECKS]
         opponent_seed = int(self.np_random.integers(2**32))
         self.opponent_random = random.Random(opponent_seed)
@@ -153,16 +171,14 @@ class CREnv(gym.Env):
         return self.opponent(self.opponent_observation)
 
     def step(self, action):
-        """One decision. Skips ahead (and sums discounted rewards) while no card is
-        playable, or while a saved card is still unaffordable."""
+        """One decision. Skips ahead (and sums discounted rewards) while banking,
+        and while no card is playable."""
         p0 = self.battle.players[0]
-        saving_card = None
-        if self.allow_saving:
-            action = self.saving.resolve(p0, action)
-            saving_card = self.saving.card
+        action = self.bank.resolve(self.battle, 0, action)
+        bank_target = self.bank.target
         observation, reward, done, _, info = self._step_once(action)
         elapsed = info["elapsed_seconds"]
-        while not done and ((saving_card is not None and self.saving.waiting(p0))
+        while not done and (self.bank.active(self.battle)
                             or not any(p0.can_play_card(card) for card in p0.cycle[:4])):
             observation, next_reward, done, _, next_info = self._step_once((0, 0, 0))
             reward += self.discount_gamma ** (elapsed / DECISION_SECONDS) * next_reward
@@ -170,8 +186,8 @@ class CREnv(gym.Env):
         info["elapsed_seconds"] = elapsed
         info["discount_steps"] = elapsed / DECISION_SECONDS
         info["transition_discount"] = self.discount_gamma ** info["discount_steps"]
-        if saving_card is not None:
-            info["saving_card"] = saving_card
+        if bank_target is not None:
+            info["bank_target"] = bank_target
         return observation, reward, done, done, info
 
     def _potential(self):

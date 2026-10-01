@@ -54,8 +54,6 @@ def parse_args():
     parser.add_argument("--max-history", type=int, default=8)
     parser.add_argument("--max-exploiters", type=int, default=4)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--allow-saving", action=argparse.BooleanOptionalAction, default=False,
-                        help="Selecting an unaffordable card waits until it is affordable")
     preliminary, _ = parser.parse_known_args()
     if preliminary.resume:
         state_path = preliminary.run_dir / "league.json"
@@ -64,7 +62,7 @@ def parse_args():
         saved = json.loads(state_path.read_text()).get("settings", {})
         defaults = {key: value for key, value in saved.items() if key != "training"}
         defaults.update({key: value for key, value in saved.get("training", {}).items()
-                         if key in ("workers", "rollout_steps", "batch_size", "device", "allow_saving")})
+                         if key in ("workers", "rollout_steps", "batch_size", "device")})
         parser.set_defaults(**defaults)
     return parser.parse_args()
 
@@ -74,10 +72,8 @@ def main(args=None):
     root = args.run_dir.resolve()
     state_path = root / "league.json"
     state = json.loads(state_path.read_text()) if args.resume else {}
-    if args.resume and state.get("version") != 2:
-        raise ValueError("This league predates paired promotion; start a new run directory")
-    if args.resume:
-        state["settings"]["training"].setdefault("allow_saving", False)
+    if args.resume and state.get("version") != 3:
+        raise ValueError("This league predates bank actions; start a new run directory")
     if args.cycles < 1 or args.steps_per_cycle < 1 or args.games < 1:
         raise ValueError("cycles, steps-per-cycle, and games must be positive")
     if args.exploit_steps < 0:
@@ -96,7 +92,6 @@ def main(args=None):
     config = TrainConfig(**state["settings"]["training"]) if args.resume else TrainConfig()
     config.workers, config.rollout_steps = args.workers, args.rollout_steps
     config.batch_size, config.device = args.batch_size, args.device
-    config.allow_saving = getattr(args, "allow_saving", False)
     config.validate()
     settings = {name: getattr(args, name) for name in (
         "seed", "games", "script_fraction", "promotion_margin", "rollback_margin",
@@ -129,7 +124,7 @@ def main(args=None):
         state = {"initial_checkpoint": current}
 
     state.update({
-        "version": 2, "settings": settings,
+        "version": 3, "settings": settings,
         "gamma": config.gamma,
         "gae_lambda": config.gae_lambda,
         "current": current,

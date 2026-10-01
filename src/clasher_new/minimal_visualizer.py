@@ -317,7 +317,8 @@ class Visualizer:
         if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
             slot, y, x = self.model.predict(final_observation, deterministic=False)[0]
-            if slot != 0:
+            # Bank actions (slot > 4) just wait here: the model is asked again in 0.5 s.
+            if 1 <= slot <= 4:
                 card_name = entity_names[hand[slot - 1]]
                 elixir = Card(card_name).elixir
                 if elixir > self.snapshot['own_elixir_1e0']: return

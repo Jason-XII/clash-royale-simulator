@@ -1,8 +1,9 @@
-"""The PPO policy: pick WAIT or a card, then a tile, both restricted to legal moves.
+"""The PPO policy: pick WAIT, a card, or a bank target; for a card, then a tile.
 
 Observations must include `legal_mask` (4, 32, 18): which tiles each hand slot can
-use right now. Sampling, log-probabilities and entropy all use the same mask.
-Parameter names match older checkpoints, so `PPO.load` still works on them.
+use right now. Bank targets already reached are masked using `elixir`.
+Sampling, log-probabilities and entropy all use the same masks.
+Checkpoints from before banking (5 action slots) still load and never bank.
 """
 import numpy as np
 import torch
@@ -12,7 +13,7 @@ import torch.nn.functional as F
 from stable_baselines3.common.policies import MultiInputActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from environment import entity_names
+from environment import BANK_TARGETS, CARD_SLOTS, entity_names
 
 EMBED = 8          # entity embedding size inside the board encoder
 CARD_EMBED = 16    # card embedding size in the policy heads
@@ -60,16 +61,16 @@ class BoardEncoder(BaseFeaturesExtractor):
 class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
     WAIT_PLAY_ENTROPY_WEIGHT = 0.10
     PLACEMENT_ENTROPY_WEIGHT = 0.25
+    BANK_ENTROPY_WEIGHT = 1.00
 
-    def __init__(self, observation_space, action_space, lr_schedule, *args,
-                 allow_saving=False, **kwargs):
-        # With saving, any hand card may be chosen; unaffordable ones mean "save".
-        self.allow_saving = bool(allow_saving)
+    def __init__(self, observation_space, action_space, lr_schedule, *args, **kwargs):
+        kwargs.pop("allow_saving", None)  # recorded by older checkpoints; feature removed
         kwargs.setdefault("features_extractor_class", BoardEncoder)
         if not kwargs.get("share_features_extractor", True):
             raise ValueError("MaskedSpatialPolicy requires a shared feature extractor")
         super().__init__(observation_space, action_space, lr_schedule, *args, **kwargs)
         latent = self.global_dim = self.mlp_extractor.latent_dim_pi
+        self.n_banks = int(action_space.nvec[0]) - 1 - CARD_SLOTS
         # Replaces SB3's MultiDiscrete head. Keep this registration order: the
         # saved optimizer state is matched to parameters by position.
         self.action_net = nn.Identity()
@@ -82,6 +83,10 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
             nn.Conv2d(32, 32, 3, padding=2, dilation=2), nn.ReLU(),
             nn.Conv2d(32, 1, 1),
         )
+        if self.n_banks:
+            self.bank_head = nn.Linear(latent, self.n_banks)
+            self.register_buffer("bank_targets", torch.tensor(BANK_TARGETS[:self.n_banks],
+                                                              dtype=torch.float32), persistent=False)
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
     def load_state_dict(self, state_dict, strict=True, **kwargs):
@@ -96,22 +101,24 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
         latent_pi, latent_vf = self.mlp_extractor(self.extract_features(obs))
         return latent_pi, self.features_extractor.spatial, latent_vf
 
-    def _card_distribution(self, latent_pi, obs):
-        """Categorical over [WAIT, slot 1..4], and the hand's card ids (B, 4)."""
-        hand = obs["hand"][:, :4].long()
-        state = latent_pi.unsqueeze(1).expand(-1, 4, -1)
-        scores = self.card_scorer(torch.cat((state, self.card_embedding(hand)), dim=2)).squeeze(2)
-        if not self.allow_saving:
-            scores = scores.masked_fill(~self._legal_slots(obs), -1e9)
-        return Categorical(logits=torch.cat((self.noop_head(latent_pi), scores), dim=1)), hand
+    def _choice_distribution(self, latent_pi, obs):
+        """Categorical over [WAIT, card slot 1..4, bank target 1..n]."""
+        hand = obs["hand"][:, :CARD_SLOTS].long()
+        state = latent_pi.unsqueeze(1).expand(-1, CARD_SLOTS, -1)
+        cards = self.card_scorer(torch.cat((state, self.card_embedding(hand)), dim=2)).squeeze(2)
+        logits = [self.noop_head(latent_pi), cards.masked_fill(~self._legal_slots(obs), -1e9)]
+        if self.n_banks:
+            reached = obs["elixir"].float() >= self.bank_targets
+            logits.append(self.bank_head(latent_pi).masked_fill(reached, -1e9))
+        return Categorical(logits=torch.cat(logits, dim=1))
 
     def _placement_distribution(self, latent_pi, spatial, obs, slot):
         """Categorical over the 576 tiles for hand slot `slot` (0-based, (B,)).
 
-        A slot with no legal tile (unaffordable/saving) gets a single placeholder
-        tile, so it contributes zero log-probability and entropy.
+        A slot with no legal tile (WAIT, banking, unaffordable) gets a single
+        placeholder tile, so it contributes zero log-probability and entropy.
         """
-        card = obs["hand"][:, :4].long().gather(1, slot[:, None]).squeeze(1)
+        card = obs["hand"][:, :CARD_SLOTS].long().gather(1, slot[:, None]).squeeze(1)
         context = self.placement_context(torch.cat((latent_pi, self.card_embedding(card)), dim=1))
         logits = self.tile_scorer(spatial + context[:, :, None, None]).flatten(1)
         tiles = obs["legal_mask"].flatten(2).bool()[torch.arange(len(slot), device=slot.device), slot].clone()
@@ -122,17 +129,21 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
     def _legal_slots(obs):
         return obs["legal_mask"].flatten(2).bool().any(dim=2)
 
+    @staticmethod
+    def _plays(choice):
+        return (choice >= 1) & (choice <= CARD_SLOTS)
+
     # --- SB3 interface -------------------------------------------------------
 
     def _sample_action(self, obs, deterministic=False):
         latent_pi, spatial, latent_vf = self._latents(obs)
-        cards, _ = self._card_distribution(latent_pi, obs)
-        choice = cards.logits.argmax(1) if deterministic else cards.sample()
-        place = self._placement_distribution(latent_pi, spatial, obs, (choice - 1).clamp(min=0))
+        choices = self._choice_distribution(latent_pi, obs)
+        choice = choices.logits.argmax(1) if deterministic else choices.sample()
+        place = self._placement_distribution(latent_pi, spatial, obs, (choice - 1).clamp(0, CARD_SLOTS - 1))
         tile = place.logits.argmax(1) if deterministic else place.sample()
-        play = choice != 0
+        play = self._plays(choice)
         tile = torch.where(play, tile, torch.zeros_like(tile))
-        log_prob = cards.log_prob(choice) + play.float() * place.log_prob(tile)
+        log_prob = choices.log_prob(choice) + play.float() * place.log_prob(tile)
         return torch.stack((choice, tile // 18, tile % 18), dim=1), log_prob, latent_vf
 
     def forward(self, obs, deterministic=False):
@@ -146,53 +157,60 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
         latent_pi, spatial, latent_vf = self._latents(obs)
         actions = actions.long()
         choice, tile = actions[:, 0], actions[:, 1] * 18 + actions[:, 2]
-        cards, hand = self._card_distribution(latent_pi, obs)
-        place = self._placement_distribution(latent_pi, spatial, obs, (choice - 1).clamp(min=0))
-        log_prob = cards.log_prob(choice) + (choice != 0).float() * place.log_prob(tile)
-        entropy = self._conditional_entropy(latent_pi, spatial, cards, obs)
+        choices = self._choice_distribution(latent_pi, obs)
+        place = self._placement_distribution(latent_pi, spatial, obs, (choice - 1).clamp(0, CARD_SLOTS - 1))
+        log_prob = choices.log_prob(choice) + self._plays(choice).float() * place.log_prob(tile)
+        entropy = self._conditional_entropy(latent_pi, spatial, choices, obs)
         return self.value_net(latent_vf), log_prob, entropy
 
     # --- exploration bonus ---------------------------------------------------
 
-    def _conditional_entropy(self, latent_pi, spatial, cards, obs):
-        """Separately normalized entropies of WAIT-vs-PLAY, card, and tile choice.
+    def _conditional_entropy(self, latent_pi, spatial, choices, obs):
+        """Separately normalized entropies of each decision in the hierarchy:
+        hold (WAIT/bank) vs PLAY, which hold option, which card, which tile.
 
-        Card and tile entropy are conditional on playing, so they never reward
-        spending. A term is zero where that choice is forced, and each term is
-        rescaled so forced states do not dilute it across the batch.
+        Each lower choice is conditional on the branch above it, so its bonus never
+        rewards playing or holding by itself. A term is zero where that choice is
+        forced, and each term is rescaled so forced states do not dilute it.
         """
         def rescale(eligible):
             return eligible.float() * eligible.numel() / eligible.sum().clamp(min=1)
 
+        logits = choices.logits
+        card_logits = logits[:, 1:1 + CARD_SLOTS]
+        hold_logits = torch.cat((logits[:, :1], logits[:, 1 + CARD_SLOTS:]), dim=1)
         legal = self._legal_slots(obs)
         count = legal.sum(dim=1)
-        choices = torch.full_like(count, 4) if self.allow_saving else count
-        given_play = Categorical(logits=cards.logits[:, 1:])
-        wait_play = Categorical(logits=torch.stack(
-            (cards.logits[:, 0], torch.logsumexp(cards.logits[:, 1:], dim=1)), dim=1))
+        decision = count >= 1
+        given_play = Categorical(logits=card_logits)
+        given_hold = Categorical(logits=hold_logits)
+        hold_play = Categorical(logits=torch.stack(
+            (torch.logsumexp(hold_logits, dim=1), torch.logsumexp(card_logits, dim=1)), dim=1))
 
-        wait_play_entropy = wait_play.entropy() / np.log(2) * rescale(choices >= 1)
-        card_entropy = given_play.entropy() / np.log(4) * rescale(choices >= 2)
-        # With saving, weight tiles by deploying cards only, so choosing to save
-        # cannot lower the placement bonus.
-        weights = (Categorical(logits=cards.logits[:, 1:].masked_fill(~legal, -1e9)).probs
-                   if self.allow_saving else given_play.probs)
+        wait_play_entropy = hold_play.entropy() / np.log(2) * rescale(decision)
+        card_entropy = given_play.entropy() / np.log(CARD_SLOTS) * rescale(count >= 2)
+        bank_entropy = torch.zeros_like(card_entropy)
+        if self.n_banks:
+            hold_options = 1 + (obs["elixir"].float() < self.bank_targets).sum(dim=1)
+            bank_entropy = (given_hold.entropy() / np.log(1 + self.n_banks)
+                            * rescale(decision & (hold_options >= 2)))
         placement = torch.zeros_like(card_entropy)
-        raw_placement = torch.zeros_like(card_entropy)
-        for slot in range(4):
+        for slot in range(CARD_SLOTS):
             slots = torch.full_like(count, slot)
             tile_entropy = self._placement_distribution(latent_pi, spatial, obs, slots).entropy()
-            placement += weights[:, slot] * tile_entropy
-            raw_placement += given_play.probs[:, slot] * tile_entropy
-        placement_entropy = placement / np.log(TILES) * rescale(count >= 1)
+            placement += given_play.probs[:, slot] * tile_entropy
+        placement_entropy = placement / np.log(TILES) * rescale(decision)
 
         objective = (self.WAIT_PLAY_ENTROPY_WEIGHT * wait_play_entropy + card_entropy
+                     + self.BANK_ENTROPY_WEIGHT * bank_entropy
                      + self.PLACEMENT_ENTROPY_WEIGHT * placement_entropy)
+        play_probability = choices.probs[:, 1:1 + CARD_SLOTS].sum(dim=1)
         self.entropy_diagnostics = {
             "wait_play": wait_play_entropy.mean().detach(),
             "actionable_card": card_entropy.mean().detach(),
+            "bank_choice": bank_entropy.mean().detach(),
             "legal_placement": placement_entropy.mean().detach(),
-            "joint_action": (cards.entropy() + (1 - cards.probs[:, 0]) * raw_placement).mean().detach(),
+            "joint_action": (choices.entropy() + play_probability * placement).mean().detach(),
             "objective": objective.mean().detach(),
         }
         return objective

@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import CREnv, CardSaving, entity_names
+from environment import Bank, BANK_TARGETS, CREnv, entity_names
 from masked_spatial import MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import DiverseOpponent, STRATEGIES
@@ -29,17 +29,13 @@ DEFAULT_GAMMA = 0.997
 DEFAULT_GAE_LAMBDA = 0.995
 # Bump this when the return or entropy objective changes, even if gamma does not.
 # v3: both players decide from the same snapshot (the opponent used to see the
-# learner's card before choosing).
-TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v3_simultaneous"
+# learner's card before choosing). v4: bank-until-elixir actions.
+TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v4_bank"
 PPO_SETTINGS = {  # TrainConfig field -> PPO attribute
     "workers": "n_envs", "rollout_steps": "n_steps", "batch_size": "batch_size",
     "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
     "entropy": "ent_coef", "gamma": "gamma", "gae_lambda": "gae_lambda",
 }
-
-
-def training_semantics(config):
-    return TRAINING_SEMANTICS + ("_card_saving_v1" if config.allow_saving else "")
 
 
 def mirror_grid(grid):
@@ -95,28 +91,27 @@ class FrozenPolicy:
         self.path = str(Path(checkpoint))
         self.model = PPO.load(self.path, device="cpu")
         self.deterministic = deterministic
-        self.allow_saving = getattr(self.model.policy, "allow_saving", False)
         self.env = None
-        self.saving = CardSaving()
+        self.bank = Bank()
         self.__name__ = "frozen_" + Path(checkpoint).stem
 
     def bind_env(self, env):
         self.env = env
 
     def reset(self):
-        self.saving = CardSaving()
+        self.bank = Bank()
 
     def __call__(self, observation):
         if self.env is None:
             raise RuntimeError("FrozenPolicy must be bound to its battle environment")
-        player = self.env.battle.players[1]
         mask = self.env.legal_mask(1)
-        if self.allow_saving and (self.saving.waiting(player) or not mask.any()):
+        # Like the learner: no decision while banking or while no card is playable.
+        if self.bank.active(self.env.battle) or not mask.any():
             return (0, 0, 0)
         action, _ = self.model.predict(dict(observation, legal_mask=mask),
                                        deterministic=self.deterministic)
         action = tuple(map(int, np.asarray(action).reshape(-1)[:3]))
-        return self.saving.resolve(player, action) if self.allow_saving else action
+        return self.bank.resolve(self.env.battle, 1, action)
 
 
 class ReflectedOpponent:
@@ -209,7 +204,7 @@ class OpponentFactory:
                               self.counter_fraction, self.forced)
 
 
-def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, allow_saving=False):
+def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA):
     """Return a picklable worker factory for ParallelVecEnv."""
     def factory():
         env_seed = 10_000 + seed * 1_000 + rank
@@ -218,8 +213,7 @@ def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, allow_s
         torch.set_num_threads(1)
         torch.manual_seed(env_seed)
         opponent = opponent_factory()
-        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma,
-                    allow_saving=allow_saving)
+        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma)
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(env)
         return LearnerView(env, seed=env_seed)
@@ -240,7 +234,6 @@ class TrainConfig:
     gamma: float = DEFAULT_GAMMA
     gae_lambda: float = DEFAULT_GAE_LAMBDA
     device: str = "auto"
-    allow_saving: bool = False
 
     def validate(self):
         if self.workers < 1 or self.rollout_steps < 1 or self.batch_size < 1:
@@ -257,10 +250,8 @@ def check_continuation(model, config):
     differences = [f"{key}: checkpoint={value!r}, requested={getattr(config, key)!r}"
                    for key, value in effective_settings(model).items()
                    if value != getattr(config, key)]
-    if getattr(model, "training_semantics", None) != training_semantics(config):
+    if getattr(model, "training_semantics", None) != TRAINING_SEMANTICS:
         differences.append("checkpoint has an older or unknown training objective")
-    if getattr(model.policy, "allow_saving", False) != config.allow_saving:
-        differences.append("checkpoint saving-action setting differs")
     if not isinstance(model.policy, MaskedSpatialPolicy):
         differences.append("checkpoint does not use MaskedSpatialPolicy")
     if differences:
@@ -289,10 +280,10 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
         check_continuation(source, config)  # fail before starting worker processes
     reset_value_head = bool(initialize and (
         source.gamma != config.gamma
-        or getattr(source, "training_semantics", None) != training_semantics(config)))
+        or getattr(source, "training_semantics", None) != TRAINING_SEMANTICS))
 
     output.mkdir(parents=True, exist_ok=False)
-    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma, config.allow_saving)
+    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma)
                           for rank in range(config.workers)],
                          monitor=output / "monitor.csv")
     try:
@@ -309,8 +300,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
                 target_kl=config.target_kl, ent_coef=config.entropy,
                 gamma=config.gamma, gae_lambda=config.gae_lambda,
                 rollout_buffer_class=VariableDiscountBuffer, device=config.device, seed=seed,
-                policy_kwargs={**(source.policy_kwargs if source is not None else {}),
-                               "allow_saving": config.allow_saving},
+                policy_kwargs=source.policy_kwargs if source is not None else None,
                 verbose=1, tensorboard_log=str(output / "tensorboard"),
             )
             if source is not None:
@@ -319,7 +309,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
                     weights.update({key: value for key, value in model.policy.state_dict().items()
                                     if key.startswith("value_net.")})
                 model.policy.load_state_dict(weights, strict=True)
-        model.training_semantics = training_semantics(config)
+        model.training_semantics = TRAINING_SEMANTICS
         check_continuation(model, config)
         metadata = {
             "initial": str(Path(initial).resolve()) if initial else None,
@@ -327,7 +317,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
             "source_steps": int(source.num_timesteps) if source else None,
             "reset_value_head": reset_value_head,
             "training_semantics": model.training_semantics,
-            "allow_saving": config.allow_saving,
+            "bank_targets": list(BANK_TARGETS),
             "initial_steps": int(model.num_timesteps),
             "requested_steps": int(steps),
             "seed": seed,
