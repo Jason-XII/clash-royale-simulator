@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import Bank, BANK_TARGETS, CREnv, entity_names, enemy_troops_in_half
+from environment import Bank, BANK_TARGETS, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
 from masked_spatial import MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import DiverseOpponent, STRATEGIES
@@ -29,8 +29,9 @@ DEFAULT_GAMMA = 0.997
 DEFAULT_GAE_LAMBDA = 0.995
 # Bump this when the return or entropy objective changes, even if gamma does not.
 # v3: both players decide from the same snapshot (the opponent used to see the
-# learner's card before choosing). v4: bank-until-elixir actions.
-TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v4_bank"
+# learner's card before choosing). v4: bank-until-elixir actions. v5: cards land
+# after a random play delay.
+TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v5_delay"
 PPO_SETTINGS = {  # TrainConfig field -> PPO attribute
     "workers": "n_envs", "rollout_steps": "n_steps", "batch_size": "batch_size",
     "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
@@ -143,6 +144,9 @@ class LeagueOpponent:
     With history: `script_fraction` of episodes use scripts, the rest checkpoints
     (exploiters 25% of those). Of script episodes, `counter_fraction` use the
     mirrored counterpush script. `forced` always uses that checkpoint.
+
+    Within scripts and within checkpoints, opponents are picked by difficulty
+    (PFSP): weight (1 - win rate)^2, from this worker's recent games against each.
     """
 
     def __init__(self, history=(), exploiters=(), script_fraction=0.60,
@@ -155,6 +159,8 @@ class LeagueOpponent:
         self.scripts = training_opponents()
         self.cache = {}
         self.opponent = None
+        self.key = None
+        self.win_rate = {}
         self.env = None
 
     def bind_env(self, env):
@@ -167,18 +173,37 @@ class LeagueOpponent:
             self.cache[path] = FrozenPolicy(path)
         return self.cache[path]
 
+    def _record_result(self):
+        """Fold the finished game into the learner's win rate against its opponent."""
+        battle = getattr(self.env, "battle", None)
+        if self.key is None or battle is None or not battle.game_over:
+            return
+        result = 1.0 if battle.winner == 0 else 0.5 if battle.winner is None else 0.0
+        rate = self.win_rate.get(self.key, 0.5)
+        self.win_rate[self.key] = rate + 0.1 * (result - rate)  # ponytail: EMA over ~10 games
+
+    def _pick(self, keys):
+        # ponytail: unseen opponents start at 50%; the floor keeps beaten ones in rotation.
+        weights = [(1 - self.win_rate.get(key, 0.5)) ** 2 + 0.05 for key in keys]
+        return random.choices(keys, weights)[0]
+
     def reset(self):
+        self._record_result()
         # The first draw happens even without history, keeping seeded runs stable.
         draw = None if self.forced else random.random()
         if self.forced:
+            self.key = self.forced
             self.opponent = self._policy(self.forced)
         elif self.history and draw >= self.script_fraction:
             paths = self.exploiters if self.exploiters and random.random() < 0.25 else self.history
-            self.opponent = self._policy(random.choice(paths))
+            self.key = self._pick(paths)
+            self.opponent = self._policy(self.key)
         elif random.random() < self.counter_fraction:
+            self.key = "counterpush_mirrored"
             self.opponent = ReflectedOpponent(DiverseOpponent("counterpush"))
         else:
-            self.opponent = random.choice(self.scripts)
+            self.key = self._pick(range(len(self.scripts)))
+            self.opponent = self.scripts[self.key]
         if callable(getattr(self.opponent, "reset", None)):
             self.opponent.reset()
         if hasattr(self.opponent, "bind_env"):
@@ -205,7 +230,7 @@ class OpponentFactory:
                               self.counter_fraction, self.forced)
 
 
-def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA):
+def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, play_delay=LIVE_PLAY_DELAY):
     """Return a picklable worker factory for ParallelVecEnv."""
     def factory():
         env_seed = 10_000 + seed * 1_000 + rank
@@ -214,7 +239,7 @@ def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA):
         torch.set_num_threads(1)
         torch.manual_seed(env_seed)
         opponent = opponent_factory()
-        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma)
+        env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma, play_delay=play_delay)
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(env)
         return LearnerView(env, seed=env_seed)
@@ -235,12 +260,16 @@ class TrainConfig:
     gamma: float = DEFAULT_GAMMA
     gae_lambda: float = DEFAULT_GAE_LAMBDA
     device: str = "auto"
+    play_delay: tuple[float, float] = LIVE_PLAY_DELAY
 
     def validate(self):
         if self.workers < 1 or self.rollout_steps < 1 or self.batch_size < 1:
             raise ValueError("workers, rollout_steps, and batch_size must be positive")
         if not 0 < self.gamma <= 1 or not 0 < self.gae_lambda <= 1:
             raise ValueError("gamma and gae_lambda must be in (0, 1]")
+        self.play_delay = list(self.play_delay)  # matches league.json after a JSON round-trip
+        if not 0 <= self.play_delay[0] <= self.play_delay[1]:
+            raise ValueError("play_delay must be (low, high) with 0 <= low <= high")
 
 
 def effective_settings(model):
@@ -284,7 +313,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
         or getattr(source, "training_semantics", None) != TRAINING_SEMANTICS))
 
     output.mkdir(parents=True, exist_ok=False)
-    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma)
+    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma, tuple(config.play_delay))
                           for rank in range(config.workers)],
                          monitor=output / "monitor.csv")
     try:
@@ -324,6 +353,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
             "seed": seed,
             **effective_settings(model),
             "discount_unit_seconds": 0.5,
+            "play_delay": list(config.play_delay),
             "policy": type(model.policy).__name__,
         }
         (output / "experiment.json").write_text(json.dumps(metadata, indent=2) + "\n")

@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import Bank, CREnv, entity_names, enemy_troops_in_half
+from environment import Bank, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
 from strategies import DiverseOpponent
 from train_core import ReflectedOpponent
 
@@ -173,7 +173,7 @@ def _evaluate_schedule(checkpoint, schedule):
     models = {name: PPO.load(name, device="cpu") for name in sorted(paths)}
     rows = []
     for match in schedule:
-        env = CREnv()
+        env = CREnv(play_delay=LIVE_PLAY_DELAY)
         spec, side = match["opponent"], match["side"]
         candidate = EvaluationActor(env, side, match["policy_seed"], model=models[path])
         if spec["kind"] == "checkpoint":

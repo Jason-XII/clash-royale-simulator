@@ -157,7 +157,8 @@ def main():
     import stable_baselines3
     import torch
     from masked_spatial import MaskedSpatialPolicy
-    from parallel_rollout import ParallelPPO, ParallelVecEnv
+    from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
+    from train_core import DEFAULT_GAE_LAMBDA, DEFAULT_GAMMA
     from stable_baselines3.common.logger import configure
     from stable_baselines3.common.utils import get_device
 
@@ -281,8 +282,9 @@ def main():
                     n_epochs=4,
                     target_kl=0.03,
                     ent_coef=0.005,
-                    gamma=0.99,
-                    gae_lambda=0.95,
+                    gamma=DEFAULT_GAMMA,
+                    gae_lambda=DEFAULT_GAE_LAMBDA,
+                    rollout_buffer_class=VariableDiscountBuffer,
                     device=resolved_device,
                     seed=args.seed + repeat,
                     verbose=0,

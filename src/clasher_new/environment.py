@@ -82,6 +82,9 @@ class Bank:
         return self.target is not None
 
 
+LIVE_PLAY_DELAY = (1.0, 2.0)  # seconds between a tap and the card landing in the live game
+
+
 class CREnv(gym.Env):
     def __init__(self, opponent_model=None, visualize=False, speed=1.0, discount_gamma=0.997,
                  play_delay=(0.0, 0.0)):
