@@ -1,9 +1,10 @@
 import pygame
 import json
+from pathlib import Path
 from threading import Thread
 
 from run_raw_capture import mainloop
-from environment import entity_names, card_types
+from environment import Bank, entity_names, card_types
 from card_utils import Card
 
 import numpy as np
@@ -25,8 +26,8 @@ AW, AH = 18*TILE, 32*TILE
 W, H = AW+120, AH+100
 BLUE, RED, GREEN, CYAN, DKGRAY, BLACK, WHITE = (100,100,255),(255,100,100),(100,255,100),(100,255,255),(64,64,64),(0,0,0),(255,255,255)
 
-steps = ('selfplay-10.4M',)
-models = [PPO.load("cr_adaptation/cr_13700000_steps.zip", device="cpu")]
+steps = ('bank-11.1M',)
+models = [PPO.load("final.zip", device="cpu")]
 
 # Static legal-deploy tiles for the local player (own-half zones; fences & tower tiles
 # excluded). The live client has no simulator battle, so we approximate legality with the
@@ -109,6 +110,9 @@ class Visualizer:
         self.model_index = 0
         self.model = models[self.model_index]
         self.model_label = steps[self.model_index]
+        self.bank = Bank()
+        self.pending = None             # (card, battle clock) of a swipe the game hasn't shown yet
+        self.last_decision_clock = None
         self.tower_info = {}
         self.score_started = False
         self.last_score_snapshot_ms = None
@@ -119,6 +123,62 @@ class Visualizer:
         self.enemy_integrity = 1.0
         self.own_crowns_lost = 0
         self.enemy_crowns_lost = 0
+        self.capture = None             # this game's capture file, opened when the battle starts
+        self.last_captured_ms = None
+
+    def record(self, event, **fields):
+        """Append one JSON line to captures/game_<date>_<time>.jsonl, flushed immediately."""
+        if self.capture is None:
+            Path('captures').mkdir(exist_ok=True)
+            path = Path('captures') / time.strftime('game_%Y%m%d_%H%M%S.jsonl')
+            self.capture = path.open('w')
+            print('Recording this game to', path)
+            self.capture.write(json.dumps({'event': 'start', 'model': self.model_label,
+                                           'local_player_index': self.local_player_index}) + '\n')
+        self.capture.write(json.dumps({'event': event, **fields}, default=int) + '\n')
+        self.capture.flush()
+
+    def capture_snapshot(self):
+        """Record each new snapshot once the battle has started (all six towers seen)."""
+        snapshot = self.snapshot
+        if self.score_started and snapshot['t_ms'] != self.last_captured_ms:
+            self.last_captured_ms = snapshot['t_ms']
+            self.record('snapshot', snapshot=snapshot)
+
+    def own_view(self, entity):
+        """Entity position in the model's own view (own towers near y=0), as in training.
+
+        Measured from a capture as player 0: raw y already is own-view y and raw x is
+        mirrored (a swipe at tile x lands at raw x = 18 - x). Player 1 is assumed to be
+        the 180-degree rotation of that; confirm it with a capture played as player 1.
+        """
+        x, y = entity['pos_x_7c'] / 1000, entity['pos_y_80'] / 1000
+        return (18 - x, y) if self.local_player_index == 0 else (x, 32 - y)
+
+    @staticmethod
+    def is_king(tower):
+        # kind_30 is not the tower type (the king switches 12 -> 13 when it activates);
+        # both king towers sit on the center line.
+        return abs(tower['pos_x_7c'] - 9000) < 100
+
+    def enemy_troops_in_half(self):
+        """Pointers of enemy troops in our half, for Bank (same rule as in training).
+
+        Towers and spells don't count; unknown cards do, to stay on the safe side.
+        """
+        intruders = set()
+        for entity in self.snapshot['entities']:
+            if entity['side_78'] == self.local_player_index or entity['card_id_ac'] == -1:
+                continue
+            name = cards.get(entity['card_id_ac'])
+            try:
+                if name is not None and Card(name).type == 'spell':
+                    continue
+            except KeyError:
+                pass
+            if self.own_view(entity)[1] < 16:
+                intruders.add(entity['ptr'])
+        return intruders
 
     def update_score(self):
         if not self.snapshot.get('entity_list_valid'):
@@ -133,9 +193,15 @@ class Visualizer:
             if len(towers) < 6:
                 return
             self.tower_info = {
-                e['ptr']: (e['side_78'], e['kind_30']) for e in towers
+                e['ptr']: (e['side_78'], self.is_king(e)) for e in towers
             }
             self.score_started = True
+            # In training the own king tower is at y=3; anything else means the model
+            # would see the arena upside down (see own_view).
+            own_king = [e for e in towers if self.is_king(e) and e['side_78'] == self.local_player_index]
+            if not own_king or abs(self.own_view(own_king[0])[1] - 3) > 0.5:
+                print(f'WARNING: own king tower is not at own-view y=3 for player '
+                      f'{self.local_player_index}; fix own_view before trusting this game.')
 
         # Known towers that disappear from the entity list remain at zero.
         ratios = {pointer: 0.0 for pointer in self.tower_info}
@@ -149,18 +215,18 @@ class Visualizer:
         own = enemy = 0.0
         own_princess_lost = enemy_princess_lost = 0
         own_king_lost = enemy_king_lost = False
-        for pointer, (side, kind) in self.tower_info.items():
+        for pointer, (side, king) in self.tower_info.items():
             ratio = ratios[pointer]
             is_own = side == self.local_player_index
-            weight = 0.4 if kind == 13 else 0.3
+            weight = 0.4 if king else 0.3
             if is_own:
                 own += weight * ratio
-                own_king_lost |= kind == 13 and ratio == 0
-                own_princess_lost += int(kind == 12 and ratio == 0)
+                own_king_lost |= king and ratio == 0
+                own_princess_lost += int(not king and ratio == 0)
             else:
                 enemy += weight * ratio
-                enemy_king_lost |= kind == 13 and ratio == 0
-                enemy_princess_lost += int(kind == 12 and ratio == 0)
+                enemy_king_lost |= king and ratio == 0
+                enemy_princess_lost += int(not king and ratio == 0)
 
         own = float(np.clip(own, 0.0, 1.0))
         enemy = float(np.clip(enemy, 0.0, 1.0))
@@ -214,7 +280,7 @@ class Visualizer:
         obs = np.zeros((32, 18, 15), dtype=np.float32)
         for entity in list(self.snapshot['entities']):
             if entity['card_id_ac'] == -1 and entity['kind_30'] in (12, 13):
-                name = "KingTower" if entity['kind_30'] == 13 else 'King_PrincessTowers'
+                name = "KingTower" if self.is_king(entity) else 'King_PrincessTowers'
             else:
                 if entity['card_id_ac'] in cards:
                     name = cards[entity['card_id_ac']]
@@ -229,12 +295,8 @@ class Visualizer:
                     print('Entity unknown:', entity['card_id_ac'])
                     name = entity['card_id_ac']
             r = 0.5 * TILE
-            if self.local_player_index == 1:
-                x, y = entity['pos_x_7c']/1000, entity['pos_y_80']/1000
-                color = BLUE if entity['side_78'] == 1 else RED
-            else:
-                x, y = 18-entity['pos_x_7c']/1000, 32-entity['pos_y_80']/1000
-                color = BLUE if entity['side_78'] == 0 else RED
+            x, y = self.own_view(entity)
+            color = BLUE if entity['side_78'] == self.local_player_index else RED
 
             # we turn that into an environment compatible observation
             card = Card(name)
@@ -260,7 +322,7 @@ class Visualizer:
                                 projectile_damage])
             obs[y1][x1] = obs_arr.copy()
 
-            sx, sy = w2s(x, y)
+            sx, sy = w2s(x, 32 - y)  # draw own side at the bottom, like the phone screen
             pygame.draw.circle(self.screen, color, (sx, sy), max(r, 4))
             pygame.draw.circle(self.screen, BLACK, (sx, sy), max(r, 4), 1)
             lbl = self.font.render(str(name), True, BLACK)
@@ -316,13 +378,34 @@ class Visualizer:
             hand_names, self.snapshot['own_elixir_1e0'])
         if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
-            slot, y, x = self.model.predict(final_observation, deterministic=False)[0]
-            # Bank actions (slot > 4) just wait here: the model is asked again in 0.5 s.
-            if 1 <= slot <= 4:
+            elixir = self.snapshot['own_elixir_1e0']
+            clock = self.snapshot['battle_clock_220']
+            if clock == self.last_decision_clock:
+                return                      # the battle clock stopped: the game is over
+            self.last_decision_clock = clock
+            # A swipe takes ~2 s to leave the hand (~1 s to cost elixir). In training a play
+            # lands at once, so don't decide again on the stale state; give up after 3 s.
+            if self.pending is not None:
+                card, since = self.pending
+                if card in hand_names[:4] and clock - since < 3:
+                    return
+                self.pending = None
+            # Same rules as training: no decision while banking or while no card is playable.
+            if (self.bank.active(elixir, self.enemy_troops_in_half)
+                    or not final_observation['legal_mask'].any()):
+                return
+            action = self.model.predict(final_observation, deterministic=False)[0]
+            slot, y, x = self.bank.resolve(action, self.enemy_troops_in_half)
+            if self.capture is not None:
+                self.record('decision', t_ms=self.snapshot['t_ms'],
+                            battle_clock=self.snapshot['battle_clock_220'], elixir=elixir,
+                            hand=hand_names, action=list(action), played=[slot, y, x],
+                            bank_target=self.bank.target)
+            if slot:
                 card_name = entity_names[hand[slot - 1]]
-                elixir = Card(card_name).elixir
-                if elixir > self.snapshot['own_elixir_1e0']: return
+                if Card(card_name).elixir > elixir: return
                 swipe(slot, y, x)
+                self.pending = (card_name, clock)
 
     def draw_ui(self):
         hand = []
@@ -364,6 +447,7 @@ class Visualizer:
             if self.snapshot and self.local_player_index is not None:
                 if self.snapshot['battle_clock_220'] is not None:
                     self.update_score()
+                    self.capture_snapshot()
                     self.render_frame()
         if self.score_started:
             total, defense, offense, result = self.scores(final=True)
@@ -371,6 +455,11 @@ class Visualizer:
                 f"model={self.model_label} total={total:.2f} "
                 f"defense={defense:.2f} offense={offense:.2f} result={result}"
             )
+            if self.capture is not None:
+                self.record('end', total=total, defense=defense, offense=offense, result=result,
+                            own_crowns_lost=self.own_crowns_lost,
+                            enemy_crowns_lost=self.enemy_crowns_lost)
+                self.capture.close()
         pygame.quit()
 
 window = Visualizer()

@@ -24,6 +24,48 @@ ELIXIR_COST = {
 }
 
 
+# Spells at level 11, from the card data: area radius (tiles) and troop damage.
+SPELLS = {"Fireball": (2.5, 688), "Arrows": (3.5, 3 * 122)}
+UNITS_PER_CARD = {"Archer": 2, "Minions": 3}
+
+
+def spell_action(observation, priority=("Fireball", "Arrows"), threshold=1.0):
+    """Cast a spell on the enemy troops it is worth most against, if it is worth it.
+
+    Each unit counts as its share of its card's cost (an Archer is 1.5 elixir),
+    scaled by the fraction of its HP the spell removes. Casts only when that
+    value reaches ``threshold`` times the spell's cost. Leading moving troops
+    was tried and made the scripts weaker (positions are whole tiles, and troops
+    stop when they engage), so spells aim where troops are.
+    """
+    hand = np.asarray(observation["hand"])
+    elixir = float(np.asarray(observation["elixir"])[0])
+    grid = np.asarray(observation["grid"])
+    frame = grid[-1] if grid.ndim == 4 else grid
+    units = []                                   # enemy troops: (y, x, value per unit, hp)
+    for y, x in np.argwhere(frame[:, :, 0] > 0):
+        row = frame[y, x]
+        if int(row[2]) == 1 and int(row[1]) == 1:
+            name = ENTITY_NAMES[int(row[0])]
+            hp = float(np.exp(10 * row[8])) if row[8] else 1.0   # observation stores log(hp)/10
+            units.append((y + .5, x + .5, ELIXIR_COST.get(name, 0) / UNITS_PER_CARD.get(name, 1), hp))
+    if not units:
+        return None
+    for spell in priority:
+        if elixir < ELIXIR_COST[spell] or _action(hand, spell, 0, 0) is None:
+            continue
+        radius, damage = SPELLS[spell]
+
+        def worth(cy, cx):
+            return sum(v * min(1.0, damage / hp) for y, x, v, hp in units
+                       if (y - cy) ** 2 + (x - cx) ** 2 <= radius ** 2)
+
+        cy, cx = max(((y, x) for y, x, _, _ in units), key=lambda c: worth(*c))   # aim at a unit
+        if worth(cy, cx) >= threshold * ELIXIR_COST[spell]:
+            return _action(hand, spell, int(cy), int(cx))
+    return None
+
+
 def _action(hand, name, y, x):
     """Return an action for the first playable copy of ``name``."""
     try:
@@ -85,23 +127,9 @@ def defensive_strategy(observation, *, defend_y=16, min_defend_y=8):
                 return _action(hand, name, y, x)
         return None
 
-    # Spend a spell only when at least three enemies form one local cluster.
-    if len(enemy_troops) >= 3:
-        best_group = []
-        for center in enemy_troops:
-            group = [
-                entity for entity in enemy_troops
-                if (entity["x"] - center["x"]) ** 2
-                + (entity["y"] - center["y"]) ** 2 <= 2.5 ** 2
-            ]
-            if len(group) > len(best_group):
-                best_group = group
-        if len(best_group) >= 3:
-            target_y = round(sum(entity["y"] for entity in best_group) / len(best_group))
-            target_x = round(sum(entity["x"] for entity in best_group) / len(best_group))
-            action = first_action(("Fireball", "Arrows"), target_y, target_x)
-            if action is not None:
-                return action
+    action = spell_action(observation, ("Fireball", "Arrows"))
+    if action is not None:
+        return action
 
     # Answer the deepest intruder with a suitable counter. Ranged defenders
     # stay behind the threat, while melee defenders meet it directly.

@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import Bank, CREnv, entity_names
+from environment import Bank, CREnv, entity_names, enemy_troops_in_half
 from strategies import DiverseOpponent
 from train_core import ReflectedOpponent
 
@@ -112,7 +112,8 @@ class EvaluationActor:
     def __call__(self, observation):
         mask = self.env.legal_mask(self.side)
         self.last_action = (0, 0, 0)
-        if self.bank.active(self.env.battle) or not mask.any():
+        intruders = lambda: enemy_troops_in_half(self.env.battle, self.side)
+        if self.bank.active(self.env.battle.players[self.side].elixir, intruders) or not mask.any():
             return self.last_action
         self.decisions += 1
         for slot in range(4):
@@ -123,7 +124,7 @@ class EvaluationActor:
                 action, _ = self.model.predict(dict(observation, legal_mask=mask), deterministic=False)
             else:
                 action = self.script(observation)
-        self.last_action = self.bank.resolve(self.env.battle, self.side, tuple(map(int, action)))
+        self.last_action = self.bank.resolve(tuple(map(int, action)), intruders)
         if self.bank.target is not None:
             self.banks[self.bank.target] += 1
         slot, _, _ = self.last_action

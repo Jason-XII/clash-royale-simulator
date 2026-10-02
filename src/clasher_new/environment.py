@@ -43,44 +43,52 @@ def to_world(player_id, y, x):
     return Position(18 - (x + 0.5), 32 - (y + 0.5))
 
 
+def enemy_troops_in_half(state, player_id):
+    """Ids of enemy troops in `player_id`'s half of a simulated battle (y < 16 is player 0's)."""
+    return {key for key, entity in state.entities.items()
+            if isinstance(entity, battle.Troop) and entity.is_alive
+            and entity.player != player_id
+            and (entity.position.y < 16) == (player_id == 0)}
+
+
 class Bank:
     """A bank action: keep waiting until elixir reaches the target.
 
     Ends early when a new enemy troop crosses into this player's half, so the
     player gets to respond. Enemies already there when banking began (the player
     saw them when choosing to bank) do not interrupt it.
+
+    `intruders` is a function returning the ids of enemy troops in the player's
+    half: `enemy_troops_in_half` in the simulator, the live client's own in-game.
+    It is only called while banking.
     """
 
     def __init__(self):
         self.target = None
 
-    def resolve(self, state, player_id, action):
+    def resolve(self, action, intruders):
         """Start banking if `action` is a bank action; return what to do right now."""
         slot = int(action[0])
         if slot <= CARD_SLOTS:
             return action
-        self.target, self.player_id = BANK_TARGETS[slot - CARD_SLOTS - 1], player_id
-        self.seen = self._intruders(state)
+        self.target = BANK_TARGETS[slot - CARD_SLOTS - 1]
+        self.seen = intruders()
         return (0, 0, 0)
 
-    def active(self, state):
+    def active(self, elixir, intruders):
         """Whether to keep waiting. Clears itself once the bank ends."""
-        if self.target is not None and (state.players[self.player_id].elixir >= self.target
-                                        or not self._intruders(state) <= self.seen):
+        if self.target is not None and (elixir >= self.target or not intruders() <= self.seen):
             self.target = None
         return self.target is not None
 
-    def _intruders(self, state):
-        """Ids of enemy troops in this player's half (y < 16 is player 0's half)."""
-        return {key for key, entity in state.entities.items()
-                if isinstance(entity, battle.Troop) and entity.is_alive
-                and entity.player != self.player_id
-                and (entity.position.y < 16) == (self.player_id == 0)}
-
 
 class CREnv(gym.Env):
-    def __init__(self, opponent_model=None, visualize=False, speed=1.0, discount_gamma=0.997):
+    def __init__(self, opponent_model=None, visualize=False, speed=1.0, discount_gamma=0.997,
+                 play_delay=(0.0, 0.0)):
+        """`play_delay` (low, high): each card lands a uniform random number of seconds
+        after it is played, like the 1-2 s it takes in the live game. Off by default."""
         super().__init__()
+        self.play_delay = play_delay
         if not 0 < discount_gamma <= 1:
             raise ValueError("discount_gamma must be in (0, 1]")
         self.opponent = opponent_model
@@ -160,7 +168,9 @@ class CREnv(gym.Env):
         slot, y, x = action
         if slot:
             card = self.battle.players[player_id].cycle[slot - 1]
-            self.battle.deploy_card(player_id, card, to_world(player_id, y, x))
+            low, high = self.play_delay
+            delay = self.np_random.uniform(low, high) if high > 0 else 0.0
+            self.battle.deploy_card(player_id, card, to_world(player_id, y, x), delay)
 
     def opponent_action(self):
         """Player 1's action, decided from the same moment player 0 decided from.
@@ -174,11 +184,12 @@ class CREnv(gym.Env):
         """One decision. Skips ahead (and sums discounted rewards) while banking,
         and while no card is playable."""
         p0 = self.battle.players[0]
-        action = self.bank.resolve(self.battle, 0, action)
+        intruders = lambda: enemy_troops_in_half(self.battle, 0)
+        action = self.bank.resolve(action, intruders)
         bank_target = self.bank.target
         observation, reward, done, _, info = self._step_once(action)
         elapsed = info["elapsed_seconds"]
-        while not done and (self.bank.active(self.battle)
+        while not done and (self.bank.active(p0.elixir, intruders)
                             or not any(p0.can_play_card(card) for card in p0.cycle[:4])):
             observation, next_reward, done, _, next_info = self._step_once((0, 0, 0))
             reward += self.discount_gamma ** (elapsed / DECISION_SECONDS) * next_reward
@@ -236,11 +247,14 @@ class CREnv(gym.Env):
             if not entity.is_alive or entity.name not in ENTITY_ID:
                 continue
             data = entity.data
-            # Clip: collisions can push a unit to exactly x=18 or y=32.
-            x = int(min(max(entity.position.x, 0), 17))
-            y = int(min(max(entity.position.y, 0), 31))
+            # Mirror the exact position for player 1 before taking the tile, so both
+            # players see the same tiles (kings sit exactly on x=9, y=3/29).
+            px, py = entity.position.x, entity.position.y
             if player_id == 1:
-                x, y = 17 - x, 31 - y
+                px, py = 18 - px, 32 - py
+            # Clip: collisions can push a unit to exactly x=18 or y=32.
+            x = int(min(max(px, 0), 17))
+            y = int(min(max(py, 0), 31))
             # ponytail: one entity per tile; later entities overwrite earlier ones.
             frame[y][x] = np.array([
                 ENTITY_ID[entity.name], CARD_TYPE_ID[data.type],

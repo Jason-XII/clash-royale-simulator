@@ -663,7 +663,8 @@ class BattleState:
         self.time += dt
         self.tick += 1
 
-    def deploy_card(self, player_id, card_name, position):
+    def deploy_card(self, player_id, card_name, position, delay=0.0):
+        """Pay for and cycle the card now; its units or spell appear after `delay` seconds."""
         if not self.players[player_id].can_play_card(card_name):
             return False
         card_info = Card(card_name)
@@ -675,7 +676,7 @@ class BattleState:
             initial_position = self.arena.BLUE_KING_TOWER if player_id == 0 else self.arena.RED_KING_TOWER
 
             target = BlankEntity(position)
-            delayed_counter = 0
+            delayed_counter = delay
             for wave in range(card_info.projectile_waves):
                 initial_position = Position(initial_position.x, initial_position.y)
                 # I know that I should not use `len(self.entities)+1` here because it would cause bugs.
@@ -686,7 +687,7 @@ class BattleState:
             return True
 
         positions = get_spawn_position(card_info, position, player_id)
-        delayed_counter = 0
+        delayed_counter = delay
         for p in positions:
             self.delayed_spawn((len(self.entities)+1, p, player_id, card_name, self), delayed_counter)
             delayed_counter += card_info.spawn_delay

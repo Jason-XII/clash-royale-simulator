@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import Bank, BANK_TARGETS, CREnv, entity_names
+from environment import Bank, BANK_TARGETS, CREnv, entity_names, enemy_troops_in_half
 from masked_spatial import MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import DiverseOpponent, STRATEGIES
@@ -105,13 +105,14 @@ class FrozenPolicy:
         if self.env is None:
             raise RuntimeError("FrozenPolicy must be bound to its battle environment")
         mask = self.env.legal_mask(1)
+        intruders = lambda: enemy_troops_in_half(self.env.battle, 1)
         # Like the learner: no decision while banking or while no card is playable.
-        if self.bank.active(self.env.battle) or not mask.any():
+        if self.bank.active(self.env.battle.players[1].elixir, intruders) or not mask.any():
             return (0, 0, 0)
         action, _ = self.model.predict(dict(observation, legal_mask=mask),
                                        deterministic=self.deterministic)
         action = tuple(map(int, np.asarray(action).reshape(-1)[:3]))
-        return self.bank.resolve(self.env.battle, 1, action)
+        return self.bank.resolve(action, intruders)
 
 
 class ReflectedOpponent:

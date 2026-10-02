@@ -7,7 +7,7 @@ import random
 
 import numpy as np
 
-from defensive_strategy import ELIXIR_COST, ENTITY_NAMES, defensive_strategy
+from defensive_strategy import ELIXIR_COST, ENTITY_NAMES, defensive_strategy, spell_action
 
 
 @dataclass
@@ -78,37 +78,6 @@ class BattleView:
                 return action
         return None
 
-    def densest_enemy_group(self, radius=3.0):
-        if not self.enemy_troops:
-            return None, 0
-        best = None
-        best_group = []
-        for center in self.enemy_troops:
-            group = [
-                entity for entity in self.enemy_troops
-                if (entity["x"] - center["x"]) ** 2 + (entity["y"] - center["y"]) ** 2 <= radius ** 2
-            ]
-            if len(group) > len(best_group):
-                best = center
-                best_group = group
-        x = round(sum(entity["x"] for entity in best_group) / len(best_group))
-        y = round(sum(entity["y"] for entity in best_group) / len(best_group))
-        return (y, x), len(best_group)
-
-
-def _spell_group(view, minimum_size=2, minimum_value=6):
-    target, size = view.densest_enemy_group()
-    if target is None or size < minimum_size:
-        return None
-    y, x = target
-    group_value = sum(
-        entity["cost"] for entity in view.enemy_troops
-        if (entity["x"] - x) ** 2 + (entity["y"] - y) ** 2 <= 3.0 ** 2
-    )
-    if group_value < minimum_value:
-        return None
-    return view.first_action(("Fireball", "Arrows"), y, x)
-
 
 def _defend(view, trigger_y, ground_priority):
     threats = [entity for entity in view.enemy_troops if entity["y"] <= trigger_y]
@@ -132,7 +101,7 @@ def bridge_pressure_strategy(observation):
     """Build a protected Giant push instead of feeding troops at the bridge."""
     view = BattleView.from_observation(observation)
 
-    action = _spell_group(view, minimum_size=2, minimum_value=6)
+    action = spell_action(observation)
     if action is not None:
         return action
     action = _defend(view, 16, ("MiniPekka", "Knight", "Musketeer", "Archer", "Minions"))
@@ -163,7 +132,7 @@ def split_lane_strategy(observation):
     """Defend first, then force the quieter lane when enough elixir is banked."""
     view = BattleView.from_observation(observation)
 
-    action = _spell_group(view, minimum_size=2, minimum_value=7)
+    action = spell_action(observation, threshold=1.25)   # more selective than the others
     if action is not None:
         return action
     action = _defend(view, 16, ("MiniPekka", "Knight", "Musketeer", "Minions", "Archer"))
@@ -188,7 +157,7 @@ def counterpush_strategy(observation):
     """Bank elixir, defend deeply, then place a Giant in front of survivors."""
     view = BattleView.from_observation(observation)
 
-    action = _spell_group(view, minimum_size=2, minimum_value=6)
+    action = spell_action(observation)
     if action is not None:
         return action
     action = _defend(view, 17, ("MiniPekka", "Knight", "Musketeer", "Minions", "Archer"))
@@ -253,13 +222,11 @@ class DiverseOpponent:
         view = BattleView.from_observation(observation)
         names = ENTITY_NAMES
 
-        # Match the established defender's spell rule, with varied selectivity.
-        target, count = view.densest_enemy_group(radius=2.5)
-        if target is not None and count >= p['spell_count']:
-            priority = ('Arrows', 'Fireball') if self.style == 'spell_control' else ('Fireball', 'Arrows')
-            action = view.first_action(priority, *target)
-            if action is not None:
-                return action
+        # Shared spell rule; spell_count 3 styles are more selective.
+        priority = ('Arrows', 'Fireball') if self.style == 'spell_control' else ('Fireball', 'Arrows')
+        action = spell_action(observation, priority, threshold=1.0 if p['spell_count'] == 2 else 1.25)
+        if action is not None:
+            return action
 
         threats = [e for e in view.enemy_troops if e['y'] <= p['depth']]
         if threats:
