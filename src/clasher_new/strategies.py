@@ -190,6 +190,110 @@ def punish_strategy(observation):
     return defensive_strategy(observation, defend_y=10, min_defend_y=2)
 
 
+MELEE = ("MiniPekka", "Knight")
+TANKS = ("Giant", "Knight", "MiniPekka")
+
+
+def _value(troops):
+    """Elixir on the board; units of one card share a cost (two Archers = 3)."""
+    return sum(ELIXIR_COST.get(ENTITY_NAMES[name], 0) for name in {t["id"] for t in troops})
+
+
+def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0, bridge_y=14,
+                         stack=1.0):
+    """The user's live style, measured from three recorded wins over the model.
+
+    Bank and play rarely (~20 cards a game, usually from 8-10 elixir). Pull
+    attackers to the centre, where both towers shoot, instead of meeting them at
+    the tower; jump ranged attackers at the bridge with melee; give each push one
+    answer, and none below 4 elixir unless the attacker reaches the towers (the
+    user ignored 6 of 8 plays made while they were low); push at the bridge when
+    full; no spells.
+
+    Defaults are the measured style. `HumanStyleOpponent` varies them per game:
+    elixir thresholds (`low`, `push`, `counter`), centre tiles shifted sideways
+    (`shift`) or deeper (`depth`), bridge row, and `stack` > 1 adds a second
+    defender until the defence is worth `stack` times the push.
+    """
+    view = BattleView.from_observation(observation)
+    names = ENTITY_NAMES
+    crossing = [e for e in view.enemy_troops if e["y"] <= 17]
+    if crossing:
+        threat = min(crossing, key=lambda e: e["y"])
+        left = threat["x"] < 9
+        lane = [e for e in crossing if (e["x"] < 9) == left]
+        defenders = [e for e in view.own_troops if e["y"] <= 18 and (e["x"] < 11 if left else e["x"] > 6)]
+        if _value(defenders) >= stack * _value(lane):
+            return (0, 0, 0)                          # one answer per push
+        if view.elixir < low and threat["y"] > 8:
+            return (0, 0, 0)                          # low: let the tower start on it
+        bridge_x, centre_x, corner_x = (4, 8 + shift, 0) if left else (14, 10 - shift, 17)
+        name = names[threat["id"]]
+        if threat["air"]:
+            options = (("Archer", 8 - depth, centre_x), ("Musketeer", 6, corner_x), ("Minions", 7 - depth, centre_x))
+        elif name in TANKS:
+            options = (("MiniPekka", 9 - depth, centre_x), ("Knight", 10 - depth, centre_x),
+                       ("Archer", 8 - depth, centre_x), ("Musketeer", 6, corner_x))
+        elif threat["y"] >= 13:                       # ranged attacker at the bridge: jump it
+            options = (("MiniPekka", bridge_y, bridge_x), ("Knight", bridge_y, bridge_x),
+                       ("Minions", bridge_y, bridge_x), ("Archer", 8 - depth, centre_x))
+        else:
+            options = (("Knight", 10 - depth, centre_x), ("MiniPekka", 9 - depth, centre_x),
+                       ("Minions", 7 - depth, centre_x), ("Archer", 8 - depth, centre_x))
+        for card, y, x in options:
+            action = view.action(card, y, x)
+            if action is not None:
+                return action
+        return (0, 0, 0)
+
+    enemy_towers = {e["x"] < 9 for e in view.enemies if e["id"] == names.index("King_PrincessTowers")}
+    survivors = [e for e in view.own_troops if 14 <= e["y"] <= 22]
+    if survivors and view.elixir >= counter:          # back up a counterpush at the bridge
+        x = 4 if np.mean([e["x"] for e in survivors]) < 9 else 14
+        action = view.first_action(("MiniPekka", "Minions", "Knight"), bridge_y, x)
+        if action is not None:
+            return action
+    if view.elixir < push:
+        return (0, 0, 0)
+    for left in (True, False):                        # a princess tower is down: pocket
+        if left not in enemy_towers:
+            action = view.first_action(MELEE, 20, 8 if left else 10)
+            if action is not None:
+                return action
+    action = view.first_action(("MiniPekka", "Minions"), bridge_y, view.lane_x)
+    if action is not None:
+        return action
+    action = (view.action("Knight", 1, 9) or view.action("Archer", 1, 9)
+              or view.action("Musketeer", 2, 0 if view.lane_x < 9 else 17))
+    if action is not None:
+        return action                                 # slow build from behind the king
+    if view.elixir >= 10:
+        return view.action("Giant", bridge_y, view.lane_x) or (0, 0, 0)
+    return (0, 0, 0)
+
+
+class HumanStyleOpponent:
+    """`human_style_strategy` with its thresholds and tiles redrawn every game, so
+    the learner has to beat the style rather than one fixed set of numbers."""
+
+    __name__ = "randomized_human"
+
+    def __init__(self):
+        self.parameters = None
+
+    def reset(self):
+        rng = random.Random(random.getrandbits(64))   # like DiverseOpponent: seeded by the episode
+        self.parameters = dict(low=rng.choice((3, 4, 5)), push=rng.choice((8, 9, 10)),
+                               counter=rng.choice((7, 8, 9)), shift=rng.choice((-1, 0, 1)),
+                               depth=rng.choice((0, 1)), bridge_y=rng.choice((13, 14)),
+                               stack=rng.choice((1.0, 1.0, 1.5)))
+
+    def __call__(self, observation):
+        if self.parameters is None:
+            self.reset()
+        return human_style_strategy(observation, **self.parameters)
+
+
 class DiverseOpponent:
     def __init__(self, style):
         self.style = style
@@ -275,4 +379,5 @@ STRATEGIES = {
     "split": split_lane_strategy,
     "counterpush": counterpush_strategy,
     "punish": punish_strategy,
+    "human": human_style_strategy,
 }
