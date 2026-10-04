@@ -27,9 +27,15 @@ FIELDS = ('actions', 'rewards', 'episode_starts', 'values', 'log_probs',
           'advantages', 'returns', 'discounts', 'lambda_discounts')
 
 
-def attach(buffer, descriptors, rank=None):
-    for key, (path, shape, dtype) in descriptors.items():
-        value = np.memmap(path, mode='r+', shape=shape, dtype=dtype)
+def open_shared(descriptors):
+    """Map each shared file once. Open mappings survive the path being deleted
+    (e.g. by a /tmp cleaner on a cluster), so never reopen by path mid-run."""
+    return {key: np.memmap(path, mode='r+', shape=shape, dtype=dtype)
+            for key, (path, shape, dtype) in descriptors.items()}
+
+
+def attach(buffer, arrays, rank=None):
+    for key, value in arrays.items():
         if rank is not None:
             value = value[:, rank:rank+1]
         if key.startswith('obs:'):
@@ -78,13 +84,13 @@ class VariableDiscountBuffer(DictRolloutBuffer):
 
 class SharedBuffer(VariableDiscountBuffer):
     def __init__(self, *args, descriptors, rank, **kwargs):
-        self.descriptors, self.rank = descriptors, rank
+        self.arrays, self.rank = open_shared(descriptors), rank
         super().__init__(*args, **kwargs)
 
     def reset(self):
         # Every slot is overwritten before training. Avoid zeroing shared storage.
         self.observations = {}
-        attach(self, self.descriptors, self.rank)
+        attach(self, self.arrays, self.rank)
         self.pos, self.full, self.generator_ready = 0, False, False
 
     def compute_returns_and_advantage(self, last_values, dones):
@@ -169,7 +175,7 @@ def endpoint(factory):
 
 class ParallelVecEnv(SubprocVecEnv):
     def __init__(self, factories, monitor=None):
-        self.storage = tempfile.TemporaryDirectory(prefix='ppo-segments-')
+        self.storage = None                  # created with the shared files, in prepare
         self.descriptors = None
         self.version = 0
         self.started = time.time()
@@ -188,12 +194,13 @@ class ParallelVecEnv(SubprocVecEnv):
             return
         arrays = {**{'obs:'+key: value for key, value in buffer.observations.items()},
                   **{key: getattr(buffer, key) for key in FIELDS}}
+        self.storage = tempfile.TemporaryDirectory(prefix='ppo-segments-', ignore_cleanup_errors=True)
         self.descriptors = {}
         for index, (key, value) in enumerate(arrays.items()):
             path = str(Path(self.storage.name)/f'{index}.bin')
-            mapped = np.memmap(path, mode='w+', shape=value.shape, dtype=value.dtype)
+            np.memmap(path, mode='w+', shape=value.shape, dtype=value.dtype).flush()
             self.descriptors[key] = (path, value.shape, value.dtype.str)
-            del mapped
+        self.arrays = open_shared(self.descriptors)
         config = dict(policy=model.policy_class, policy_kwargs=model.policy_kwargs,
                       n_steps=model.n_steps, batch_size=min(model.batch_size, model.n_steps),
                       gamma=model.gamma, gae_lambda=model.gae_lambda, seed=None)
@@ -240,7 +247,8 @@ class ParallelVecEnv(SubprocVecEnv):
                 remote.close()
             if self.writer:
                 self.writer.close()
-            self.storage.cleanup()
+            if self.storage is not None:
+                self.storage.cleanup()
 
 
 class ParallelPPO(PPO):
@@ -265,7 +273,7 @@ class ParallelPPO(PPO):
         if any(segment['version'] != env.version for segment in segments):
             raise RuntimeError('Mixed policy versions in rollout')
         rollout_buffer.observations = {}
-        attach(rollout_buffer, env.descriptors)
+        attach(rollout_buffer, env.arrays)
         expected_returns = rollout_buffer.advantages + rollout_buffer.values
         if not (np.isfinite(expected_returns).all() and
                 np.allclose(rollout_buffer.returns, expected_returns, rtol=1e-5, atol=1e-6)):
