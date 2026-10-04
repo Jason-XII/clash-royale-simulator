@@ -61,6 +61,20 @@ def bradley_terry(results, players, iterations=2000):
     return 400 * np.log10(strength)
 
 
+def labels(paths):
+    """Each path's shortest ending that no other path shares; a league candidate
+    (cycle_0002/candidate/final.zip) is shown as its cycle (cycle_0002)."""
+    parts = [p.parts for p in paths]
+    out = []
+    for q in parts:
+        for depth in range(1, len(q) + 1):
+            end = q[-depth:]
+            if sum(r[-depth:] == end for r in parts) == 1:
+                break
+        out.append(q[-3] if q[-2:] == ("candidate", "final.zip") else "/".join(end))
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("checkpoints", nargs="+", type=Path)
@@ -73,11 +87,12 @@ def main():
     checkpoints = {}
     for path in args.checkpoints:   # duplicates play once, under the first name
         checkpoints.setdefault(weights_id(path), path.resolve())
-    names = {wid: path.name for wid, path in checkpoints.items()}
+    label = dict(zip(args.checkpoints, labels([p.resolve() for p in args.checkpoints])))
+    names = {wid: label[next(p for p in args.checkpoints if p.resolve() == path)] for wid, path in checkpoints.items()}
     for path in args.checkpoints:
         wid = weights_id(path)
-        if names[wid] != path.name:
-            print(f"{path.name} has the same weights as {names[wid]}; rating them once as {names[wid]}")
+        if names[wid] != label[path]:
+            print(f"{label[path]} has the same weights as {names[wid]}; rating them once as {names[wid]}")
     cache = json.loads(args.cache.read_text()) if args.cache.is_file() else {}
 
     tasks = []
@@ -124,29 +139,31 @@ def main():
     low, high = np.percentile(boot, [2.5, 97.5], axis=0)
 
     styles = sorted({s for row in panel_rows.values() for s in row})
-    print(f"\n{'checkpoint':>12} {'steps':>9} {'Elo':>6} {'95% CI':>13}  {'panel':>5}  " + "  ".join(f"{s[:14]:>14}" for s in styles))
+    cw = max([12] + [len(names[p]) for p in players if p in checkpoints])
+    print(f"\n{'checkpoint':>{cw}} {'steps':>9} {'Elo':>6} {'95% CI':>13}  {'panel':>5}  " + "  ".join(f"{s[:14]:>14}" for s in styles))
     for i, player in enumerate(players):
         if player in checkpoints:
             row = panel_rows[player]
             w, n = sum(v[0] for v in row.values()), sum(v[1] for v in row.values())
-            print(f"{names[player]:>12} {steps(checkpoints[player]) / 1e6:>8.2f}M {elo[i]:>6.0f} "
+            print(f"{names[player]:>{cw}} {steps(checkpoints[player]) / 1e6:>8.2f}M {elo[i]:>6.0f} "
                   f"[{low[i]:>5.0f},{high[i]:>5.0f}]  {w / n:>5.0%}  "
                   + "  ".join(f"{row[s][0] / row[s][1]:>14.0%}" for s in styles))
         else:
-            print(f"{player[7:][:12]:>12} {'script':>9} {elo[i]:>6.0f} [{low[i]:>5.0f},{high[i]:>5.0f}]")
+            print(f"{player[7:][:cw]:>{cw}} {'script':>9} {elo[i]:>6.0f} [{low[i]:>5.0f},{high[i]:>5.0f}]")
     print("\nhead to head (row's win rate vs column):")
     ckpts = [p for p in players if p in checkpoints]
-    print(" " * 8 + "".join(f"{names[c][:6]:>7}" for c in ckpts))
+    w = max(len(names[c]) for c in ckpts) + 2
+    print(" " * w + "".join(f"{names[c]:>{w}}" for c in ckpts))
     for a in ckpts:
         cells = []
         for b in ckpts:
             if (a, b) in results:
-                w, n = results[(a, b)]; cells.append(f"{w / n:>7.0%}")
+                won, n = results[(a, b)]; cells.append(f"{won / n:>{w}.0%}")
             elif (b, a) in results:
-                w, n = results[(b, a)]; cells.append(f"{1 - w / n:>7.0%}")
+                won, n = results[(b, a)]; cells.append(f"{1 - won / n:>{w}.0%}")
             else:
-                cells.append(f"{'-':>7}")
-        print(f"{names[a][:6]:>8}" + "".join(cells))
+                cells.append(f"{'-':>{w}}")
+        print(f"{names[a]:>{w}}" + "".join(cells))
     print("\nElo gap -> expected win rate: 50 = 57%, 100 = 64%, 200 = 76%.")
 
 
