@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 
-from environment import Bank, BANK_TARGETS, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
+from environment import Bank, BANK_TARGETS, CARD_SLOTS, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
 from masked_spatial import MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import DiverseOpponent, HumanStyleOpponent, STRATEGIES
@@ -49,13 +49,28 @@ def mirror_grid(grid):
     return mirrored
 
 
-class LearnerView(gym.Wrapper):
-    """Player 0's view: mirrored for a random half of episodes, plus `legal_mask`."""
+# Cards a handicap game can ban: the cheap troops every model so far plays in a
+# fixed 5-card cycle. Banned cards never leave the hand, so they crowd it with
+# Giant, Fireball and Arrows until those are the only playable cards, and the
+# learner must learn to use them to win. Two bans are needed to force spells:
+# with one, playing the Giant is enough to free a slot. The objective stays winning.
+BAN_CARDS = ("Knight", "MiniPekka", "Archer", "Minions", "Musketeer")
 
-    def __init__(self, env, seed=0):
+
+class LearnerView(gym.Wrapper):
+    """Player 0's view: mirrored for a random half of episodes, plus `legal_mask`.
+
+    With `ban_fraction`, that share of episodes bans one or two cards from
+    BAN_CARDS for the learner (masked out of `legal_mask`, so they stay stuck in
+    the hand).
+    """
+
+    def __init__(self, env, seed=0, ban_fraction=0.0):
         super().__init__(env)
         self.rng = random.Random(seed)
         self.reflected = False
+        self.ban_fraction = ban_fraction
+        self.banned = set()
         self.observation_space = spaces.Dict({
             **env.observation_space.spaces,
             "legal_mask": spaces.MultiBinary((4, 32, 18)),
@@ -66,17 +81,30 @@ class LearnerView(gym.Wrapper):
         if seed is not None:
             self.rng.seed(seed)
         self.reflected = self.rng.random() < 0.5
+        self.banned = set()
+        if self.ban_fraction and self.rng.random() < self.ban_fraction:   # no extra draw when off
+            self.banned = set(self.rng.sample(BAN_CARDS, self.rng.choice((1, 2))))
         return self.observation(obs), info
 
     def step(self, action):
         slot, y, x = map(int, action)
+        if 1 <= slot <= CARD_SLOTS and self._hand()[slot - 1] in self.banned:
+            slot = 0                                  # never happens with a masked policy
         if self.reflected and slot:
             x = 17 - x
         obs, reward, terminated, truncated, info = self.env.step((slot, y, x))
         return self.observation(obs), reward, terminated, truncated, info
 
+    def _hand(self):
+        return self.env.unwrapped.battle.players[0].cycle[:4]
+
     def observation(self, obs):
         mask = self.env.unwrapped.legal_mask(0)
+        if self.banned:
+            mask = mask.copy()
+            for slot, card in enumerate(self._hand()):
+                if card in self.banned:
+                    mask[slot] = 0
         if self.reflected:
             obs = dict(obs, grid=mirror_grid(obs["grid"]))
             mask = mask[:, :, ::-1].copy()
@@ -230,7 +258,8 @@ class OpponentFactory:
                               self.counter_fraction, self.forced)
 
 
-def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, play_delay=LIVE_PLAY_DELAY):
+def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, play_delay=LIVE_PLAY_DELAY,
+             ban_fraction=0.0):
     """Return a picklable worker factory for ParallelVecEnv."""
     def factory():
         env_seed = 10_000 + seed * 1_000 + rank
@@ -242,7 +271,7 @@ def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, play_de
         env = CREnv(opponent_model=opponent, discount_gamma=discount_gamma, play_delay=play_delay)
         if callable(getattr(opponent, "bind_env", None)):
             opponent.bind_env(env)
-        return LearnerView(env, seed=env_seed)
+        return LearnerView(env, seed=env_seed, ban_fraction=ban_fraction)
     return factory
 
 
@@ -261,6 +290,7 @@ class TrainConfig:
     gae_lambda: float = DEFAULT_GAE_LAMBDA
     device: str = "auto"
     play_delay: tuple[float, float] = LIVE_PLAY_DELAY
+    ban_fraction: float = 0.0          # share of handicap episodes, see BAN_CARDS
 
     def validate(self):
         if self.workers < 1 or self.rollout_steps < 1 or self.batch_size < 1:
@@ -270,6 +300,8 @@ class TrainConfig:
         self.play_delay = list(self.play_delay)  # matches league.json after a JSON round-trip
         if not 0 <= self.play_delay[0] <= self.play_delay[1]:
             raise ValueError("play_delay must be (low, high) with 0 <= low <= high")
+        if not 0 <= self.ban_fraction <= 1:
+            raise ValueError("ban_fraction must be in [0, 1]")
 
 
 def effective_settings(model):
@@ -313,7 +345,8 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
         or getattr(source, "training_semantics", None) != TRAINING_SEMANTICS))
 
     output.mkdir(parents=True, exist_ok=False)
-    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma, tuple(config.play_delay))
+    env = ParallelVecEnv([make_env(rank, seed, opponent_factory, config.gamma, tuple(config.play_delay),
+                                   config.ban_fraction)
                           for rank in range(config.workers)],
                          monitor=output / "monitor.csv")
     try:
@@ -354,6 +387,7 @@ def train_cycle(output, steps, seed, opponent_factory, config=None, initial=None
             **effective_settings(model),
             "discount_unit_seconds": 0.5,
             "play_delay": list(config.play_delay),
+            "ban_fraction": config.ban_fraction,
             "policy": type(model.policy).__name__,
         }
         (output / "experiment.json").write_text(json.dumps(metadata, indent=2) + "\n")

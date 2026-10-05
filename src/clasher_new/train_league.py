@@ -54,6 +54,9 @@ def parse_args():
     parser.add_argument("--max-history", type=int, default=8)
     parser.add_argument("--max-exploiters", type=int, default=4)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--ban-fraction", type=float, default=0.0,
+                        help="Share of training games that ban one cheap card for the learner, "
+                             "forcing Giant/spell play (default: 0)")
     preliminary, _ = parser.parse_known_args()
     if preliminary.resume:
         state_path = preliminary.run_dir / "league.json"
@@ -62,7 +65,7 @@ def parse_args():
         saved = json.loads(state_path.read_text()).get("settings", {})
         defaults = {key: value for key, value in saved.items() if key != "training"}
         defaults.update({key: value for key, value in saved.get("training", {}).items()
-                         if key in ("workers", "rollout_steps", "batch_size", "device")})
+                         if key in ("workers", "rollout_steps", "batch_size", "device", "ban_fraction")})
         parser.set_defaults(**defaults)
     return parser.parse_args()
 
@@ -92,6 +95,7 @@ def main(args=None):
     config = TrainConfig(**state["settings"]["training"]) if args.resume else TrainConfig()
     config.workers, config.rollout_steps = args.workers, args.rollout_steps
     config.batch_size, config.device = args.batch_size, args.device
+    config.ban_fraction = args.ban_fraction
     config.validate()
     settings = {name: getattr(args, name) for name in (
         "seed", "games", "script_fraction", "promotion_margin", "rollback_margin",
@@ -101,6 +105,9 @@ def main(args=None):
     settings["training"] = asdict(config)
 
     if args.resume:
+        saved = TrainConfig(**state["settings"]["training"])   # fill fields added since the run began
+        saved.validate()
+        state["settings"]["training"] = asdict(saved)
         if state.get("settings") != settings:
             raise ValueError("Resume settings differ from league.json; omit overrides to use saved settings")
         current = state.get("current")
