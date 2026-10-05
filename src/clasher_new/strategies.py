@@ -200,7 +200,7 @@ def _value(troops):
 
 
 def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0, bridge_y=14,
-                         stack=1.0, giant=False, ignore_ranged=False):
+                         stack=1.0, giant=False, ignore_ranged=False, switch=7):
     """The user's live style, measured from five recorded wins over the model.
 
     Answer each push as it crosses the river (median 0.5 s after), usually with
@@ -213,6 +213,9 @@ def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0
     spells. `giant` plays the user's Giant pushes: from behind the king when
     full, supported at the bridge as it crosses. `ignore_ranged` leaves a lone
     Archer or Musketeer to the tower, as the user did with a quarter of them.
+    `switch`: once the learner has this much elixir of troops in one lane and
+    none in the other, push the empty lane at the bridge (how the user took a
+    tower from cycle6: the learner kept stacking a defended lane and ran dry).
 
     `HumanStyleOpponent` varies the thresholds, tiles (`shift` sideways toward
     the centre, `depth` deeper), bridge row, `stack` > 1 (a second defender until
@@ -220,6 +223,13 @@ def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0
     """
     view = BattleView.from_observation(observation)
     names = ENTITY_NAMES
+    stacked_left = [e for e in view.enemy_troops if e["x"] < 9]
+    stacked_right = [e for e in view.enemy_troops if e["x"] >= 9]
+    empty = None                                      # the lane to switch to, if any
+    if _value(stacked_left) >= switch and not stacked_right:
+        empty = 14
+    elif _value(stacked_right) >= switch and not stacked_left:
+        empty = 4
     crossing = [e for e in view.enemy_troops if e["y"] <= 17]
     if crossing:
         threat = min(crossing, key=lambda e: e["y"])
@@ -227,6 +237,8 @@ def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0
         lane = [e for e in crossing if (e["x"] < 9) == left]
         defenders = [e for e in view.own_troops if e["y"] <= 18 and (e["x"] < 11 if left else e["x"] > 6)]
         if _value(defenders) >= stack * _value(lane):
+            if empty is not None:                     # defence holds: punish the other lane
+                return view.first_action(("MiniPekka", "Knight", "Minions"), bridge_y, empty) or (0, 0, 0)
             return (0, 0, 0)                          # one answer per push
         if view.elixir < low and threat["y"] > 8:
             return (0, 0, 0)                          # low: let the tower start on it
@@ -257,6 +269,10 @@ def human_style_strategy(observation, low=4, push=9, counter=8, shift=0, depth=0
                 return action
         return (0, 0, 0)
 
+    if empty is not None:                             # they stacked one lane: hit the other
+        action = view.first_action(("MiniPekka", "Knight", "Minions"), bridge_y, empty)
+        if action is not None:
+            return action
     enemy_towers = {e["x"] < 9 for e in view.enemies if e["id"] == names.index("King_PrincessTowers")}
     giants = [e for e in view.own_troops if e["id"] == names.index("Giant") and 10 <= e["y"] <= 20]
     if giants and view.elixir >= 4:                   # support the Giant as it crosses
@@ -309,7 +325,7 @@ class HumanStyleOpponent:
                                counter=rng.choice((7, 8, 9)), shift=rng.choice((-1, 0, 1)),
                                depth=rng.choice((0, 1)), bridge_y=rng.choice((13, 14)),
                                stack=rng.choice((1.0, 1.0, 1.5)), giant=rng.random() < 0.5,
-                               ignore_ranged=rng.random() < 0.3)
+                               ignore_ranged=rng.random() < 0.3, switch=rng.choice((6, 7, 8, 99)))
 
     def __call__(self, observation):
         if self.parameters is None:
