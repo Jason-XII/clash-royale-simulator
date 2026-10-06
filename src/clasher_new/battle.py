@@ -553,6 +553,7 @@ class BattleState:
         self._spawn_entity(Building(6, self.arena.BLUE_KING_TOWER, 0, 'KingTower', self, True))
 
         self.schedule = []
+        self.plays = []  # (landing time, player, card, x, y) of every successful deployment
         self.building_positions = [(entity.position.x, entity.position.y, entity.data.collision_radius) for entity in self.entities.values() if isinstance(entity, Building) and entity.is_alive]
         self.building_cache = None
         self.cache_fresh = False
@@ -684,6 +685,7 @@ class BattleState:
                 self.delayed_spawn((len(self.entities)+1, initial_position, player_id, card_name, target, False, self), delayed_counter)
                 delayed_counter += card_info.wave_interval
             self.players[player_id].play_card(card_name)
+            self.plays.append((self.time + delay, player_id, card_name, position.x, position.y))
             return True
 
         positions = get_spawn_position(card_info, position, player_id)
@@ -692,6 +694,7 @@ class BattleState:
             self.delayed_spawn((len(self.entities)+1, p, player_id, card_name, self), delayed_counter)
             delayed_counter += card_info.spawn_delay
         self.players[player_id].play_card(card_name)
+        self.plays.append((self.time + delay, player_id, card_name, position.x, position.y))
         return True
 
     def can_place_troop(self, player_id, position):

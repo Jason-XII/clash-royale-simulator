@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from stable_baselines3.common.policies import MultiInputActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from environment import BANK_TARGETS, CARD_SLOTS, entity_names
+from environment import BANK_TARGETS, CARD_SLOTS, OPPONENT_PLAYS, entity_names
 
 EMBED = 8          # entity embedding size inside the board encoder
 MEMORY_FRAMES = 2  # board frames the encoder reads when the memory inputs exist
@@ -36,7 +36,8 @@ class BoardEncoder(BaseFeaturesExtractor):
 
     With the memory inputs (`queue`, `opponent_elixir`, `decision_gap`) in the
     observation space, it reads only the last MEMORY_FRAMES frames and adds those
-    inputs. Checkpoints from before them keep the original layout.
+    inputs. With `opponent_plays` it also reads the opponent's recent plays.
+    Checkpoints from before either keep their layout.
 
     Also keeps the first full-resolution conv activation in `self.spatial`
     (B, 32, 32, 18) for the tile scorer.
@@ -60,7 +61,9 @@ class BoardEncoder(BaseFeaturesExtractor):
         # hand embeddings + elixir + one-hot phase + time left
         # (+ queue embeddings, opponent elixir, decision gap)
         memory_inputs = 3 * EMBED + 2 if self.memory else 0
-        self.fc = nn.Linear(cnn_out + 5 * EMBED + 1 + 4 + 1 + memory_inputs, features_dim)
+        self.history = "opponent_plays" in observation_space.spaces
+        history_inputs = OPPONENT_PLAYS * (EMBED + 3) if self.history else 0
+        self.fc = nn.Linear(cnn_out + 5 * EMBED + 1 + 4 + 1 + memory_inputs + history_inputs, features_dim)
 
     def forward(self, obs):
         grid = obs["grid"][:, -self.frames:]                  # (B, F, 32, 18, 15)
@@ -77,6 +80,10 @@ class BoardEncoder(BaseFeaturesExtractor):
             inputs += [self.entity_embedding(obs["queue"].long()).flatten(1),
                        obs["opponent_elixir"].float(),
                        obs["decision_gap"].float() / 10]   # ponytail: banking gaps reach ~30 s
+        if self.history:
+            plays = obs["opponent_plays"].float()                     # (B, 8, card/age/x/y)
+            inputs += [self.entity_embedding(plays[..., 0].long()).flatten(1),
+                       (plays[..., 1:] / plays.new_tensor([30, 18, 32])).flatten(1)]
         return torch.relu(self.fc(torch.cat(inputs, dim=1)))
 
 

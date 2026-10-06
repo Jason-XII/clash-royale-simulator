@@ -34,6 +34,7 @@ FRAMES = 8            # observation history length, one frame per half second
 CARD_SLOTS = 4
 BANK_TARGETS = (4, 5, 6, 7, 8, 9, 10)  # slot 5 + i banks until elixir >= BANK_TARGETS[i]
 DECISION_SECONDS = 0.5
+OPPONENT_PLAYS = 8    # the opponent's most recent plays in the observation (a full deck cycle)
 
 
 def to_world(player_id, y, x):
@@ -109,6 +110,8 @@ class CREnv(gym.Env):
             "queue": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(3,), dtype=np.int32),
             "opponent_elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "decision_gap": gym.spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
+            # (card id, seconds since it landed, x, y) per play, most recent first; zeros pad.
+            "opponent_plays": gym.spaces.Box(low=0.0, high=np.inf, shape=(OPPONENT_PLAYS, 4), dtype=np.float32),
         })
         self.action_space = gym.spaces.MultiDiscrete([1 + CARD_SLOTS + len(BANK_TARGETS), 32, 18])
         self.visualize = visualize
@@ -299,4 +302,15 @@ class CREnv(gym.Env):
             # Seconds since this player's previous decision. Set by whoever decides:
             # step() for the learner, the actor itself for player 1.
             'decision_gap': np.zeros(1, dtype=np.float32),
+            'opponent_plays': self._opponent_plays(player_id, now),
         }
+
+    def _opponent_plays(self, player_id, now):
+        """The opponent's last OPPONENT_PLAYS plays that have landed, in `player_id`'s view."""
+        plays = np.zeros((OPPONENT_PLAYS, 4), dtype=np.float32)
+        landed = [p for p in self.battle.plays if p[1] != player_id and p[0] <= now][-OPPONENT_PLAYS:]
+        for row, (landed_at, _, card, x, y) in enumerate(reversed(landed)):
+            if player_id == 1:
+                x, y = 18 - x, 32 - y
+            plays[row] = ENTITY_ID[card], now - landed_at, x, y
+        return plays

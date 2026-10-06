@@ -31,7 +31,8 @@ DEFAULT_GAE_LAMBDA = 0.995
 # v3: both players decide from the same snapshot (the opponent used to see the
 # learner's card before choosing). v4: bank-until-elixir actions. v5: cards land
 # after a random play delay. v6: memory inputs (queue, opponent elixir, decision gap).
-TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v6_memory_inputs"
+# v7: the opponent's recent plays.
+TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v7_opponent_plays"
 PPO_SETTINGS = {  # TrainConfig field -> PPO attribute
     "workers": "n_envs", "rollout_steps": "n_steps", "batch_size": "batch_size",
     "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
@@ -110,7 +111,9 @@ class LearnerView(gym.Wrapper):
                 if card in self.banned:
                     mask[slot] = 0
         if self.reflected:
-            obs = dict(obs, grid=mirror_grid(obs["grid"]))
+            plays = obs["opponent_plays"].copy()
+            plays[plays[:, 0] > 0, 2] = 18 - plays[plays[:, 0] > 0, 2]    # x of real plays only
+            obs = dict(obs, grid=mirror_grid(obs["grid"]), opponent_plays=plays)
             mask = mask[:, :, ::-1].copy()
         return dict(obs, legal_mask=mask)
 
