@@ -22,9 +22,12 @@ from stable_baselines3.common.logger import configure
 from stable_baselines3.common.monitor import ResultsWriter
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
+from masked_spatial import LSTM_HIDDEN
+
 
 FIELDS = ('actions', 'rewards', 'episode_starts', 'values', 'log_probs',
-          'advantages', 'returns', 'discounts', 'lambda_discounts')
+          'advantages', 'returns', 'discounts', 'lambda_discounts', 'hidden')
+SEQUENCE_LENGTH = 64  # decisions per training chunk for recurrent policies
 
 
 def open_shared(descriptors):
@@ -45,10 +48,18 @@ def attach(buffer, arrays, rank=None):
 
 
 class VariableDiscountBuffer(DictRolloutBuffer):
-    """GAE with one discount per transition instead of one per decision."""
+    """GAE with one discount per transition instead of one per decision.
+
+    Also stores the recurrent policy's LSTM state before each step (`hidden`).
+    With `sequence_length` set, minibatches are chunks of that many consecutive
+    decisions of one worker, carrying the chunk's starting state.
+    """
+    sequence_length = 0
 
     def reset(self):
         super().reset()
+        # ponytail: allocated for feed-forward policies too; ~16 MB at 16 x 512 steps.
+        self.hidden = np.zeros((self.buffer_size, self.n_envs, 2, LSTM_HIDDEN), dtype=np.float32)
         self.discounts = np.full(
             (self.buffer_size, self.n_envs), self.gamma, dtype=np.float32
         )
@@ -80,6 +91,30 @@ class VariableDiscountBuffer(DictRolloutBuffer):
             )
             self.advantages[step] = last_gae_lam
         self.returns = self.advantages + self.values
+
+    def get(self, batch_size=None):
+        steps = self.sequence_length
+        if not steps:
+            yield from super().get(batch_size)
+            return
+        if not self.generator_ready:
+            for key, obs in self.observations.items():
+                self.observations[key] = self.swap_and_flatten(obs)
+            for name in ('actions', 'values', 'log_probs', 'advantages', 'returns',
+                         'episode_starts', 'hidden'):
+                self.__dict__[name] = self.swap_and_flatten(self.__dict__[name])
+            self.generator_ready = True
+        # Flat index = worker * buffer_size + step; buffer_size % steps == 0, so
+        # no chunk spans two workers.
+        firsts = np.random.permutation(np.arange(0, self.buffer_size * self.n_envs, steps))
+        per_batch = max(1, (batch_size or len(firsts) * steps) // steps)
+        for start in range(0, len(firsts), per_batch):
+            first = firsts[start:start + per_batch]
+            indices = (first[:, None] + np.arange(steps)).ravel()
+            samples = self._get_samples(indices)
+            samples.observations['lstm_state'] = self.to_torch(self.hidden[first])
+            samples.observations['episode_start'] = self.to_torch(self.episode_starts[indices])
+            yield samples
 
 
 class SharedBuffer(VariableDiscountBuffer):
@@ -120,6 +155,12 @@ class Events(BaseCallback):
             raise RuntimeError('Environment and PPO transition discounts disagree')
         self.model.rollout_buffer.discounts[position] = discounts
         self.model.rollout_buffer.lambda_discounts[position] = self.model.gae_lambda ** steps
+        policy = self.model.policy
+        if getattr(policy, 'recurrent', False):
+            # Store the state this step's action came from; a finished game restarts it.
+            self.model.rollout_buffer.hidden[position] = policy.state_in.cpu().numpy()
+            done = torch.as_tensor(self.locals['dones'], dtype=torch.float32).view(-1, 1, 1)
+            policy.state_in = policy.next_state * (1 - done)
         self.events.append((self.locals['infos'], self.locals['dones'].copy()))
         return True
 
@@ -253,6 +294,11 @@ class ParallelVecEnv(SubprocVecEnv):
 
 class ParallelPPO(PPO):
     def train(self):
+        if getattr(self.policy, 'recurrent', False):
+            steps = min(SEQUENCE_LENGTH, self.n_steps)
+            if self.n_steps % steps:
+                raise ValueError(f'rollout_steps must be a multiple of {SEQUENCE_LENGTH} for recurrent policies')
+            self.rollout_buffer.sequence_length = steps
         super().train()
         for name, value in getattr(self.policy, 'entropy_diagnostics', {}).items():
             self.logger.record(f'exploration/{name}_entropy', float(value.cpu()))

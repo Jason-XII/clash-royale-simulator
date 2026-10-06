@@ -45,7 +45,6 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--rollout-steps", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--script-fraction", type=float, default=0.60)
     parser.add_argument("--promotion-margin", type=float, default=0.02,
                         help="Minimum positive paired win-rate gain for promotion")
     parser.add_argument("--rollback-margin", type=float, default=0.10)
@@ -81,8 +80,6 @@ def main(args=None):
         raise ValueError("cycles, steps-per-cycle, and games must be positive")
     if args.exploit_steps < 0:
         raise ValueError("exploit-steps cannot be negative")
-    if not 0 <= args.script_fraction <= 1:
-        raise ValueError("script-fraction must be between 0 and 1")
     if args.max_history < 1 or args.max_exploiters < 0:
         raise ValueError("population limits are invalid")
     if args.games < 6 or args.games % 2:
@@ -98,7 +95,7 @@ def main(args=None):
     config.ban_fraction = args.ban_fraction
     config.validate()
     settings = {name: getattr(args, name) for name in (
-        "seed", "games", "script_fraction", "promotion_margin", "rollback_margin",
+        "seed", "games", "promotion_margin", "rollback_margin",
         "significance", "exploiter_threshold", "max_history", "max_exploiters",
         "steps_per_cycle", "exploit_steps",
     )}
@@ -169,7 +166,6 @@ def main(args=None):
         factory = OpponentFactory(
             history=tuple(dict.fromkeys(references + history)),
             exploiters=tuple(exploiters),
-            script_fraction=args.script_fraction,
         )
         candidate = train_cycle(
             output=cycle_dir / "candidate",

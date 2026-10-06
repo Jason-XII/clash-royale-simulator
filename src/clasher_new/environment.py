@@ -82,7 +82,7 @@ class Bank:
         return self.target is not None
 
 
-LIVE_PLAY_DELAY = (1.0, 2.0)  # seconds between a tap and the card landing in the live game
+LIVE_PLAY_DELAY = (0.8, 1.0)  # seconds between a tap and the card landing in the live game (hand-timed)
 
 
 class CREnv(gym.Env):
@@ -104,7 +104,11 @@ class CREnv(gym.Env):
             "hand": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(5,), dtype=np.int32),
             "elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
             "phase": gym.spaces.Discrete(4),
-            "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
+            "time_till_next_phase": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+            # Memory inputs; checkpoints from before them never see these keys.
+            "queue": gym.spaces.Box(low=0, high=len(entity_names) - 1, shape=(3,), dtype=np.int32),
+            "opponent_elixir": gym.spaces.Box(low=0.0, high=10.0, shape=(1,), dtype=np.float32),
+            "decision_gap": gym.spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
         })
         self.action_space = gym.spaces.MultiDiscrete([1 + CARD_SLOTS + len(BANK_TARGETS), 32, 18])
         self.visualize = visualize
@@ -198,6 +202,7 @@ class CREnv(gym.Env):
             reward += self.discount_gamma ** (elapsed / DECISION_SECONDS) * next_reward
             elapsed += next_info["elapsed_seconds"]
         info["elapsed_seconds"] = elapsed
+        observation["decision_gap"] = np.array([elapsed], dtype=np.float32)
         info["discount_steps"] = elapsed / DECISION_SECONDS
         info["transition_discount"] = self.discount_gamma ** info["discount_steps"]
         if bank_target is not None:
@@ -286,4 +291,12 @@ class CREnv(gym.Env):
             'elixir': np.array([self.battle.players[player_id].elixir], dtype=np.float32),
             'phase': (120, 180, 240, 300).index(phase_end),
             'time_till_next_phase': np.array([(phase_end - now) / 120.0], dtype=np.float32),
+            # The rest of the own cycle after `hand`, and the opponent's exact elixir
+            # (the live client reads it from game memory).
+            'queue': np.array([ENTITY_ID[card] for card in self.battle.players[player_id].cycle[5:8]],
+                              dtype=np.int32),
+            'opponent_elixir': np.array([self.battle.players[1 - player_id].elixir], dtype=np.float32),
+            # Seconds since this player's previous decision. Set by whoever decides:
+            # step() for the learner, the actor itself for player 1.
+            'decision_gap': np.zeros(1, dtype=np.float32),
         }

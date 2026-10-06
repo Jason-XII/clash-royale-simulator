@@ -111,6 +111,9 @@ class Visualizer:
         self.model = models[self.model_index]
         self.model_label = steps[self.model_index]
         self.bank = Bank()
+        self.lstm_state = None          # recurrent models: memory of this battle
+        self.decided_at = 0.0           # battle clock of the previous decision
+        self.deck_cards = {}            # deck index -> card name, learned from the hand
         self.pending = None             # (card, battle clock) of a swipe the game hasn't shown yet
         self.last_decision_clock = None
         self.tower_info = {}
@@ -154,6 +157,14 @@ class Visualizer:
         """
         x, y = entity['pos_x_7c'] / 1000, entity['pos_y_80'] / 1000
         return (18 - x, y) if self.local_player_index == 0 else (x, 32 - y)
+
+    def elixirs(self):
+        """(own, opponent) elixir with decimals, read from game memory by the hook.
+        Falls back to the whole-number UI value, and 5 for the opponent."""
+        raw = self.snapshot.get('elixir_raw_2f8')
+        if raw and None not in raw and self.local_player_index in (0, 1):
+            return raw[self.local_player_index] / 10000, raw[1 - self.local_player_index] / 10000
+        return self.snapshot['own_elixir_1e0'], 5.0   # ponytail: neutral guess when the read fails
 
     @staticmethod
     def is_king(tower):
@@ -347,6 +358,13 @@ class Visualizer:
         hand.append(cards[next_card_id])
         hand_names = list(hand)
         hand = np.array([entity_names.index(each) for each in hand], dtype=np.int32)
+        for each in self.snapshot['hand']:
+            self.deck_cards[each['deck_index_220']] = cards[each['data_id_40']]
+        # ponytail: cards never seen in hand yet (first seconds of a battle) show as 'None'.
+        queue = (self.snapshot.get('queue_deck_indices_230') or [])[1:4]
+        queue = np.array([entity_names.index(self.deck_cards[i]) if i in self.deck_cards else 0
+                          for i in queue] + [0] * (3 - len(queue)), dtype=np.int32)
+        own_elixir, opponent_elixir = self.elixirs()
 
         snapshot_ms = self.snapshot['t_ms']
         if not self.observation_history:
@@ -370,15 +388,16 @@ class Visualizer:
         final_observation = {
             'grid': grid,
             'hand': hand,
-            'elixir': np.array([self.snapshot['own_elixir_1e0']], dtype=np.float32),
+            'elixir': np.array([own_elixir], dtype=np.float32),
             'phase': phase,
             'time_till_next_phase': np.array([time_left / 120.0], dtype=np.float32),
+            'queue': queue,
+            'opponent_elixir': np.array([opponent_elixir], dtype=np.float32),
         }
-        final_observation['legal_mask'] = build_legal_mask(
-            hand_names, self.snapshot['own_elixir_1e0'])
+        final_observation['legal_mask'] = build_legal_mask(hand_names, own_elixir)
         if time.time() - self.start_time > 0.5:
             self.start_time = time.time()
-            elixir = self.snapshot['own_elixir_1e0']
+            elixir = own_elixir
             clock = self.snapshot['battle_clock_220']
             if clock == self.last_decision_clock:
                 return                      # the battle clock stopped: the game is over
@@ -394,7 +413,10 @@ class Visualizer:
             if (self.bank.active(elixir, self.enemy_troops_in_half)
                     or not final_observation['legal_mask'].any()):
                 return
-            action = self.model.predict(final_observation, deterministic=False)[0]
+            final_observation['decision_gap'] = np.array([clock - self.decided_at], dtype=np.float32)
+            self.decided_at = clock
+            action, self.lstm_state = self.model.predict(final_observation, state=self.lstm_state,
+                                                         deterministic=False)
             slot, y, x = self.bank.resolve(action, self.enemy_troops_in_half)
             if self.capture is not None:
                 self.record('decision', t_ms=self.snapshot['t_ms'],

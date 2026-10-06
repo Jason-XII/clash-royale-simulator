@@ -4,6 +4,14 @@ Observations must include `legal_mask` (4, 32, 18): which tiles each hand slot c
 use right now. Bank targets already reached are masked using `elixir`.
 Sampling, log-probabilities and entropy all use the same masks.
 Checkpoints from before banking (5 action slots) still load and never bank.
+
+Policies built with the memory inputs are recurrent: an LSTM over decisions sits
+between the encoder and the heads. Its state is carried three ways:
+- collecting: the running state lives in `state_in`, the rollout callback stores
+  it per step and advances it (parallel_rollout.Events);
+- training: minibatches are chunks of consecutive decisions, with each chunk's
+  starting state and the episode starts added to the observations;
+- playing: `predict(obs, state)` takes and returns the state, as in sb3-contrib.
 """
 import numpy as np
 import torch
@@ -16,12 +24,19 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from environment import BANK_TARGETS, CARD_SLOTS, entity_names
 
 EMBED = 8          # entity embedding size inside the board encoder
+MEMORY_FRAMES = 2  # board frames the encoder reads when the memory inputs exist
 CARD_EMBED = 16    # card embedding size in the policy heads
 TILES = 32 * 18
+LSTM_HIDDEN = 256  # = the encoder's features_dim, which the heads expect
+RECURRENT_KEYS = ("lstm_state", "episode_start")  # training-only observation extras
 
 
 class BoardEncoder(BaseFeaturesExtractor):
     """CNN over the stacked board frames plus hand, elixir and clock.
+
+    With the memory inputs (`queue`, `opponent_elixir`, `decision_gap`) in the
+    observation space, it reads only the last MEMORY_FRAMES frames and adds those
+    inputs. Checkpoints from before them keep the original layout.
 
     Also keeps the first full-resolution conv activation in `self.spatial`
     (B, 32, 32, 18) for the tile scorer.
@@ -30,9 +45,10 @@ class BoardEncoder(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=256):
         super().__init__(observation_space, features_dim)
         self.entity_embedding = nn.Embedding(len(entity_names), EMBED)
-        frames = observation_space["grid"].shape[0]
+        self.memory = "queue" in observation_space.spaces
+        self.frames = MEMORY_FRAMES if self.memory else observation_space["grid"].shape[0]
         # 15 raw channels: id -> embedding, type -> one-hot(4), 13 numeric stay.
-        in_channels = frames * (13 + EMBED + 4)
+        in_channels = self.frames * (13 + EMBED + 4)
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1), nn.ReLU(),
             nn.Conv2d(32, 64, 3, padding=1, stride=2), nn.ReLU(),
@@ -42,10 +58,12 @@ class BoardEncoder(BaseFeaturesExtractor):
         with torch.no_grad():
             cnn_out = self.cnn(torch.zeros(1, in_channels, 32, 18)).shape[1]
         # hand embeddings + elixir + one-hot phase + time left
-        self.fc = nn.Linear(cnn_out + 5 * EMBED + 1 + 4 + 1, features_dim)
+        # (+ queue embeddings, opponent elixir, decision gap)
+        memory_inputs = 3 * EMBED + 2 if self.memory else 0
+        self.fc = nn.Linear(cnn_out + 5 * EMBED + 1 + 4 + 1 + memory_inputs, features_dim)
 
     def forward(self, obs):
-        grid = obs["grid"]                                    # (B, F, 32, 18, 15)
+        grid = obs["grid"][:, -self.frames:]                  # (B, F, 32, 18, 15)
         ids = self.entity_embedding(grid[..., 0].long())
         card_type = F.one_hot(grid[..., 1].long(), num_classes=4).float()
         x = torch.cat([grid[..., 2:], ids, card_type], dim=-1)
@@ -53,9 +71,13 @@ class BoardEncoder(BaseFeaturesExtractor):
         self.spatial = self.cnn[1](self.cnn[0](x))
         board = self.cnn[2:](self.spatial)
         hand = self.entity_embedding(obs["hand"].long()).flatten(1)
-        return torch.relu(self.fc(torch.cat(
-            [board, hand, obs["elixir"].float(), obs["phase"].float().flatten(1),
-             obs["time_till_next_phase"].float()], dim=1)))
+        inputs = [board, hand, obs["elixir"].float(), obs["phase"].float().flatten(1),
+                  obs["time_till_next_phase"].float()]
+        if self.memory:
+            inputs += [self.entity_embedding(obs["queue"].long()).flatten(1),
+                       obs["opponent_elixir"].float(),
+                       obs["decision_gap"].float() / 10]   # ponytail: banking gaps reach ~30 s
+        return torch.relu(self.fc(torch.cat(inputs, dim=1)))
 
 
 class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
@@ -87,6 +109,10 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
             self.bank_head = nn.Linear(latent, self.n_banks)
             self.register_buffer("bank_targets", torch.tensor(BANK_TARGETS[:self.n_banks],
                                                               dtype=torch.float32), persistent=False)
+        self.recurrent = self.features_extractor.memory
+        if self.recurrent:
+            self.lstm = nn.LSTMCell(self.features_dim, LSTM_HIDDEN)
+        self.state_in = self.next_state = None   # (B, 2, LSTM_HIDDEN): h and c
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
     def load_state_dict(self, state_dict, strict=True, **kwargs):
@@ -94,12 +120,61 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
         state_dict = {k: v for k, v in state_dict.items() if k != "card_cost_table"}
         return super().load_state_dict(state_dict, strict=strict, **kwargs)
 
+    def predict(self, observation, state=None, episode_start=None, deterministic=False):
+        """Returns (actions, state). Pass the returned state back on the next
+        decision of the same game; None (or episode_start) starts a new game."""
+        if not self.recurrent:
+            return super().predict(observation, state, episode_start, deterministic)
+        hand = np.asarray(observation["hand"])
+        rows = len(hand) if hand.ndim == 2 else 1
+        if state is None:
+            state = np.zeros((rows, 2, LSTM_HIDDEN), dtype=np.float32)
+        if episode_start is not None:
+            state = state * (1 - np.asarray(episode_start, dtype=np.float32).reshape(rows, 1, 1))
+        self.state_in = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+        actions, _ = super().predict(observation, None, None, deterministic)
+        return actions, self.next_state.cpu().numpy()
+
+    def predict_values(self, obs):
+        return self.value_net(self._latents(obs)[2])
+
+    def obs_to_tensor(self, observation):
+        # Checkpoints from before the memory inputs reject observation keys they don't know.
+        if isinstance(observation, dict):
+            observation = {key: value for key, value in observation.items()
+                           if key in self.observation_space.spaces}
+        return super().obs_to_tensor(observation)
+
     # --- distributions -------------------------------------------------------
 
     def _latents(self, obs):
         """Returns (latent_pi, spatial map, latent_vf)."""
-        latent_pi, latent_vf = self.mlp_extractor(self.extract_features(obs))
+        features = self.extract_features({k: v for k, v in obs.items() if k not in RECURRENT_KEYS})
+        if self.recurrent:
+            features = self._recur(features, obs)
+        latent_pi, latent_vf = self.mlp_extractor(features)
         return latent_pi, self.features_extractor.spatial, latent_vf
+
+    def _recur(self, features, obs):
+        """The LSTM over decisions. Training observations carry each chunk's starting
+        state and per-step episode starts (features are chunk-major); otherwise this
+        is one step from `state_in`. Leaves the final state in `next_state`."""
+        if "lstm_state" in obs:
+            state, starts = obs["lstm_state"], obs["episode_start"].float()
+        else:
+            if self.state_in is None or len(self.state_in) != len(features):
+                self.state_in = features.new_zeros(len(features), 2, LSTM_HIDDEN)
+            state, starts = self.state_in, features.new_zeros(len(features))
+        chunks = len(state)
+        x, starts = features.view(chunks, -1, features.shape[1]), starts.view(chunks, -1)
+        h, c = state[:, 0], state[:, 1]
+        outputs = []
+        for step in range(x.shape[1]):
+            keep = 1 - starts[:, step:step + 1]
+            h, c = self.lstm(x[:, step], (h * keep, c * keep))
+            outputs.append(h)
+        self.next_state = torch.stack((h, c), dim=1).detach()
+        return torch.stack(outputs, dim=1).reshape(len(features), -1)
 
     def _choice_distribution(self, latent_pi, obs):
         """Categorical over [WAIT, card slot 1..4, bank target 1..n]."""

@@ -30,8 +30,8 @@ DEFAULT_GAE_LAMBDA = 0.995
 # Bump this when the return or entropy objective changes, even if gamma does not.
 # v3: both players decide from the same snapshot (the opponent used to see the
 # learner's card before choosing). v4: bank-until-elixir actions. v5: cards land
-# after a random play delay.
-TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v5_delay"
+# after a random play delay. v6: memory inputs (queue, opponent elixir, decision gap).
+TRAINING_SEMANTICS = "elapsed_half_seconds_balanced_entropy_potential_v6_memory_inputs"
 PPO_SETTINGS = {  # TrainConfig field -> PPO attribute
     "workers": "n_envs", "rollout_steps": "n_steps", "batch_size": "batch_size",
     "epochs": "n_epochs", "learning_rate": "learning_rate", "target_kl": "target_kl",
@@ -121,7 +121,7 @@ class FrozenPolicy:
         self.model = PPO.load(self.path, device="cpu")
         self.deterministic = deterministic
         self.env = None
-        self.bank = Bank()
+        self.reset()
         self.__name__ = "frozen_" + Path(checkpoint).stem
 
     def bind_env(self, env):
@@ -129,6 +129,8 @@ class FrozenPolicy:
 
     def reset(self):
         self.bank = Bank()
+        self.decided_at = 0.0
+        self.state = None            # LSTM state of recurrent checkpoints, one game
 
     def __call__(self, observation):
         if self.env is None:
@@ -138,8 +140,11 @@ class FrozenPolicy:
         # Like the learner: no decision while banking or while no card is playable.
         if self.bank.active(self.env.battle.players[1].elixir, intruders) or not mask.any():
             return (0, 0, 0)
-        action, _ = self.model.predict(dict(observation, legal_mask=mask),
-                                       deterministic=self.deterministic)
+        now = self.env.battle.time
+        gap = np.array([now - self.decided_at], dtype=np.float32)
+        self.decided_at = now
+        action, self.state = self.model.predict(dict(observation, legal_mask=mask, decision_gap=gap),
+                                                state=self.state, deterministic=self.deterministic)
         action = tuple(map(int, np.asarray(action).reshape(-1)[:3]))
         return self.bank.resolve(action, intruders)
 
@@ -166,25 +171,25 @@ def training_opponents():
         + [DiverseOpponent("deep_defense"), DiverseOpponent("counterpush"), HumanStyleOpponent()]
 
 
+COUNTERPUSH_MIRRORED = "counterpush_mirrored"
+
+
 class LeagueOpponent:
-    """Each episode, pick a script or a frozen checkpoint (history/exploiter).
+    """Each episode, pick an opponent from one pool: the scripts (by index), the
+    mirrored counterpush script, and frozen checkpoints (history and exploiters,
+    by path). `forced` always uses that checkpoint.
 
-    With history: `script_fraction` of episodes use scripts, the rest checkpoints
-    (exploiters 25% of those). Of script episodes, `counter_fraction` use the
-    mirrored counterpush script. `forced` always uses that checkpoint.
-
-    Within scripts and within checkpoints, opponents are picked by difficulty
-    (PFSP): weight (1 - win rate)^2, from this worker's recent games against each.
+    Opponents are picked by difficulty (PFSP): weight (1 - win rate)^2 + 0.05, from
+    this worker's recent games against each. Scripts the learner has mastered sink
+    to the floor share, and come back if it starts losing to them.
     """
 
-    def __init__(self, history=(), exploiters=(), script_fraction=0.60,
-                 counter_fraction=0.20, forced=None):
-        self.history = tuple(map(str, history))
-        self.exploiters = tuple(map(str, exploiters))
-        self.script_fraction = float(script_fraction)
-        self.counter_fraction = float(counter_fraction)
+    def __init__(self, history=(), exploiters=(), forced=None):
         self.forced = str(forced) if forced else None
         self.scripts = training_opponents()
+        self.counterpush = ReflectedOpponent(DiverseOpponent("counterpush"))
+        self.pool = [*range(len(self.scripts)), COUNTERPUSH_MIRRORED,
+                     *dict.fromkeys(map(str, (*history, *exploiters)))]
         self.cache = {}
         self.opponent = None
         self.key = None
@@ -196,10 +201,14 @@ class LeagueOpponent:
         if hasattr(self.opponent, "bind_env"):
             self.opponent.bind_env(env)
 
-    def _policy(self, path):
-        if path not in self.cache:
-            self.cache[path] = FrozenPolicy(path)
-        return self.cache[path]
+    def _opponent(self, key):
+        if key == COUNTERPUSH_MIRRORED:
+            return self.counterpush
+        if isinstance(key, int):
+            return self.scripts[key]
+        if key not in self.cache:
+            self.cache[key] = FrozenPolicy(key)
+        return self.cache[key]
 
     def _record_result(self):
         """Fold the finished game into the learner's win rate against its opponent."""
@@ -217,21 +226,8 @@ class LeagueOpponent:
 
     def reset(self):
         self._record_result()
-        # The first draw happens even without history, keeping seeded runs stable.
-        draw = None if self.forced else random.random()
-        if self.forced:
-            self.key = self.forced
-            self.opponent = self._policy(self.forced)
-        elif self.history and draw >= self.script_fraction:
-            paths = self.exploiters if self.exploiters and random.random() < 0.25 else self.history
-            self.key = self._pick(paths)
-            self.opponent = self._policy(self.key)
-        elif random.random() < self.counter_fraction:
-            self.key = "counterpush_mirrored"
-            self.opponent = ReflectedOpponent(DiverseOpponent("counterpush"))
-        else:
-            self.key = self._pick(range(len(self.scripts)))
-            self.opponent = self.scripts[self.key]
+        self.key = self.forced or self._pick(self.pool)
+        self.opponent = self._opponent(self.key)
         if callable(getattr(self.opponent, "reset", None)):
             self.opponent.reset()
         if hasattr(self.opponent, "bind_env"):
@@ -249,13 +245,10 @@ class OpponentFactory:
 
     history: tuple[str, ...] = ()
     exploiters: tuple[str, ...] = ()
-    script_fraction: float = 0.60
-    counter_fraction: float = 0.20
     forced: str | None = None
 
     def __call__(self):
-        return LeagueOpponent(self.history, self.exploiters, self.script_fraction,
-                              self.counter_fraction, self.forced)
+        return LeagueOpponent(self.history, self.exploiters, self.forced)
 
 
 def make_env(rank, seed, opponent_factory, discount_gamma=DEFAULT_GAMMA, play_delay=LIVE_PLAY_DELAY,

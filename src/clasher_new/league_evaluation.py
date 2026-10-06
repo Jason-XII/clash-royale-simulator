@@ -90,6 +90,8 @@ class EvaluationActor:
         self.numpy_state = np.random.RandomState(self.seed).get_state()
         self.decisions = self.deployments = self.valid = 0
         self.bank = Bank()
+        self.decided_at = 0.0
+        self.state = None            # LSTM state of recurrent checkpoints
         self.available, self.selected, self.banks = Counter(), Counter(), Counter()
         self.last_action = (0, 0, 0)
         if self.script is not None:
@@ -121,7 +123,11 @@ class EvaluationActor:
                 self.available[entity_names[int(observation["hand"][slot])]] += 1
         with self.random_stream():
             if self.model is not None:
-                action, _ = self.model.predict(dict(observation, legal_mask=mask), deterministic=False)
+                now = self.env.battle.time
+                gap = np.array([now - self.decided_at], dtype=np.float32)
+                self.decided_at = now
+                action, self.state = self.model.predict(dict(observation, legal_mask=mask, decision_gap=gap),
+                                                        state=self.state, deterministic=False)
             else:
                 action = self.script(observation)
         self.last_action = self.bank.resolve(tuple(map(int, action)), intruders)
