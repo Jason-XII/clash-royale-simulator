@@ -139,10 +139,13 @@ class MaskedSpatialPolicy(MultiInputActorCriticPolicy):
         return self.value_net(self._latents(obs)[2])
 
     def obs_to_tensor(self, observation):
-        # Checkpoints from before the memory inputs reject observation keys they don't know.
+        # Checkpoints from before the memory inputs reject observation keys they don't know,
+        # and newer ones are trained on only the last frames of the environment's grid.
         if isinstance(observation, dict):
             observation = {key: value for key, value in observation.items()
                            if key in self.observation_space.spaces}
+            frames = self.observation_space["grid"].shape[0]
+            observation["grid"] = np.asarray(observation["grid"])[..., -frames:, :, :, :]
         return super().obs_to_tensor(observation)
 
     # --- distributions -------------------------------------------------------

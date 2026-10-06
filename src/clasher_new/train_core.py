@@ -20,7 +20,7 @@ import torch
 from stable_baselines3 import PPO
 
 from environment import Bank, BANK_TARGETS, CARD_SLOTS, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
-from masked_spatial import MaskedSpatialPolicy
+from masked_spatial import MEMORY_FRAMES, MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
 from strategies import DiverseOpponent, HumanStyleOpponent, STRATEGIES
 
@@ -71,8 +71,11 @@ class LearnerView(gym.Wrapper):
         self.reflected = False
         self.ban_fraction = ban_fraction
         self.banned = set()
+        grid = env.observation_space["grid"]
         self.observation_space = spaces.Dict({
             **env.observation_space.spaces,
+            # Only the frames the encoder reads: storing and copying all 8 slowed updates.
+            "grid": spaces.Box(grid.low[-MEMORY_FRAMES:], grid.high[-MEMORY_FRAMES:], dtype=grid.dtype),
             "legal_mask": spaces.MultiBinary((4, 32, 18)),
         })
 
@@ -99,6 +102,7 @@ class LearnerView(gym.Wrapper):
         return self.env.unwrapped.battle.players[0].cycle[:4]
 
     def observation(self, obs):
+        obs = dict(obs, grid=obs["grid"][-MEMORY_FRAMES:])
         mask = self.env.unwrapped.legal_mask(0)
         if self.banned:
             mask = mask.copy()

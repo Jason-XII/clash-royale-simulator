@@ -1,7 +1,9 @@
-"""Synchronous PPO updates with independent CPU rollout workers.
+"""PPO updates overlapped with independent CPU rollout workers.
 
-Each worker collects n_steps using a single policy version, writes into its
-slice of temporary shared arrays, and waits for the next update. SB3 still
+Each worker collects n_steps using a single policy version and writes into its
+slice of temporary shared arrays. There are two sets of arrays: while the GPU
+trains on one rollout, the workers fill the other, using the policy from before
+that update (one update stale; PPO's clipped ratio corrects for it). SB3 still
 computes values/log-probabilities, timeout bootstrapping, GAE and PPO losses.
 Step callbacks are delivered after collection (suitable for checkpointing,
 not callbacks that change the policy or step the training env mid-rollout).
@@ -119,7 +121,8 @@ class VariableDiscountBuffer(DictRolloutBuffer):
 
 class SharedBuffer(VariableDiscountBuffer):
     def __init__(self, *args, descriptors, rank, **kwargs):
-        self.arrays, self.rank = open_shared(descriptors), rank
+        self.sets, self.rank = [open_shared(d) for d in descriptors], rank
+        self.arrays = self.sets[0]          # collect_segment picks the set to fill
         super().__init__(*args, **kwargs)
 
     def reset(self):
@@ -198,8 +201,9 @@ class Endpoint(gym.Wrapper):
         self.events = Events()
         self.events.init_callback(self.local)
 
-    def collect_segment(self, weights, version):
+    def collect_segment(self, weights, version, slot):
         model = self.local
+        model.rollout_buffer.arrays = model.rollout_buffer.sets[slot]   # attached by reset()
         model.policy.load_state_dict({key: torch.from_numpy(value) for key, value in weights.items()})
         model.policy.set_training_mode(False)
         self.events.events = []
@@ -217,8 +221,10 @@ def endpoint(factory):
 class ParallelVecEnv(SubprocVecEnv):
     def __init__(self, factories, monitor=None):
         self.storage = None                  # created with the shared files, in prepare
-        self.descriptors = None
+        self.descriptors = None              # two sets: one trained on, one being filled
         self.version = 0
+        self.pending = None                  # (version, slot) of the rollout being collected
+        self.last_slot = 1                   # the set train() last used; the next fill uses the other
         self.started = time.time()
         self.writer = ResultsWriter(str(monitor), header=dict(t_start=self.started, env_id=None)) if monitor else None
         try:
@@ -236,12 +242,13 @@ class ParallelVecEnv(SubprocVecEnv):
         arrays = {**{'obs:'+key: value for key, value in buffer.observations.items()},
                   **{key: getattr(buffer, key) for key in FIELDS}}
         self.storage = tempfile.TemporaryDirectory(prefix='ppo-segments-', ignore_cleanup_errors=True)
-        self.descriptors = {}
-        for index, (key, value) in enumerate(arrays.items()):
-            path = str(Path(self.storage.name)/f'{index}.bin')
-            np.memmap(path, mode='w+', shape=value.shape, dtype=value.dtype).flush()
-            self.descriptors[key] = (path, value.shape, value.dtype.str)
-        self.arrays = open_shared(self.descriptors)
+        self.descriptors = [{}, {}]
+        for slot, descriptors in enumerate(self.descriptors):
+            for index, (key, value) in enumerate(arrays.items()):
+                path = str(Path(self.storage.name)/f'{slot}-{index}.bin')
+                np.memmap(path, mode='w+', shape=value.shape, dtype=value.dtype).flush()
+                descriptors[key] = (path, value.shape, value.dtype.str)
+        self.arrays = [open_shared(descriptors) for descriptors in self.descriptors]
         config = dict(policy=model.policy_class, policy_kwargs=model.policy_kwargs,
                       n_steps=model.n_steps, batch_size=min(model.batch_size, model.n_steps),
                       gamma=model.gamma, gae_lambda=model.gae_lambda, seed=None)
@@ -249,6 +256,24 @@ class ParallelVecEnv(SubprocVecEnv):
         for rank, remote in enumerate(self.remotes):
             remote.send(('env_method', ('initialize_collector', (config, self.descriptors, rank, self.started), {})))
         self.receive()
+
+    def launch(self, policy):
+        """Start collecting the next rollout with `policy`'s current weights."""
+        weights = {key: value.detach().cpu().numpy() for key, value in policy.state_dict().items()}
+        self.version += 1
+        slot = 1 - self.last_slot
+        for remote in self.remotes:
+            remote.send(('env_method', ('collect_segment', (weights, self.version, slot), {})))
+        self.pending = (self.version, slot)
+
+    def finish(self):
+        """Wait for the rollout in flight; returns (segments, slot)."""
+        (version, slot), self.pending = self.pending, None
+        segments = self.receive()
+        if any(segment['version'] != version for segment in segments):
+            raise RuntimeError('Mixed policy versions in rollout')
+        self.last_slot = slot
+        return segments, slot
 
     def receive(self):
         deadline = time.monotonic()+1800
@@ -271,7 +296,8 @@ class ParallelVecEnv(SubprocVecEnv):
                     remote.send(('close', None))
                 except (BrokenPipeError, EOFError, OSError):
                     pass
-            deadline = time.monotonic()+5
+            # A rollout still in flight is discarded: don't wait for it.
+            deadline = time.monotonic()+(0 if self.pending else 5)
             for process in getattr(self, 'processes', []):
                 process.join(timeout=max(0, deadline-time.monotonic()))
             for process in getattr(self, 'processes', []):
@@ -311,15 +337,14 @@ class ParallelPPO(PPO):
         self.policy.set_training_mode(False)
         env.prepare(self, rollout_buffer)
         callback.on_rollout_start()
-        weights = {key: value.detach().cpu().numpy() for key, value in self.policy.state_dict().items()}
-        env.version += 1
-        for remote in env.remotes:
-            remote.send(('env_method', ('collect_segment', (weights, env.version), {})))
-        segments = env.receive()
-        if any(segment['version'] != env.version for segment in segments):
-            raise RuntimeError('Mixed policy versions in rollout')
+        if env.pending is None:
+            env.launch(self.policy)         # first rollout: nothing in flight yet
+        segments, slot = env.finish()
+        # Workers fill the other set while train() uses this one. They collect with
+        # the weights from before this update, so the next rollout is one update stale.
+        env.launch(self.policy)
         rollout_buffer.observations = {}
-        attach(rollout_buffer, env.arrays)
+        attach(rollout_buffer, env.arrays[slot])
         expected_returns = rollout_buffer.advantages + rollout_buffer.values
         if not (np.isfinite(expected_returns).all() and
                 np.allclose(rollout_buffer.returns, expected_returns, rtol=1e-5, atol=1e-6)):
