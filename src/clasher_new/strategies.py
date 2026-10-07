@@ -333,6 +333,74 @@ class HumanStyleOpponent:
         return human_style_strategy(observation, **self.parameters)
 
 
+def stacked_push_strategy(observation, start=10, defend=7, weak_lane=True, spell_threshold=2.0):
+    """Stack everything behind one Giant, the push the models never learned to defend.
+
+    At `start` elixir: a Giant from the back of the lane (the weaker enemy tower's,
+    or the right lane), then every card it can afford stacked on it as it walks:
+    Musketeer and Archers 2 tiles behind, Minions on top, melee in front once it
+    reaches the bridge. Answers only threats in its half worth `defend` elixir or
+    more; smaller ones are left to the tower so elixir keeps going into the stack.
+    Fireballs/Arrows only clusters worth `spell_threshold` times their cost.
+
+    Tuned against hist12 (13M steps), which won 38% of 320 games against these
+    defaults. What didn't help: defending more (3 elixir: 79%), cheaper spells
+    (1.0x: 65%), no spells (79%), keeping an elixir reserve while stacking, a lone
+    Giant at the bridge when the opponent is low, the human style's defence
+    between pushes, and placing supports later.
+    """
+    view = BattleView.from_observation(observation)
+    action = spell_action(observation, threshold=spell_threshold)
+    if action is not None:
+        return action
+    lane_x = view.lane_x if weak_lane else 14
+    threats = [e for e in view.enemy_troops if e["y"] <= 15]
+    if threats and _value(threats) >= defend:
+        action = _defend(view, 15, ("MiniPekka", "Knight", "Musketeer", "Archer", "Minions"))
+        if action is not None and action[0]:
+            return action
+    giants = [e for e in view.own_troops if e["id"] == ENTITY_NAMES.index("Giant") and e["y"] <= 24]
+    if giants:
+        giant = max(giants, key=lambda e: e["y"])
+        if giant["y"] < 6:
+            return (0, 0, 0)                          # let it walk; stack once it is near the river
+        behind = int(np.clip(giant["y"] - 2, 1, 14))
+        stack = (("Musketeer", behind), ("Archer", behind), ("Minions", int(np.clip(giant["y"], 1, 14))))
+        if giant["y"] >= 12:
+            stack += (("MiniPekka", 14), ("Knight", 14))
+        for card, y in stack:
+            action = view.action(card, y, giant["x"])
+            if action is not None:
+                return action
+        return (0, 0, 0)
+    if view.elixir >= start:
+        action = view.action("Giant", 2, lane_x)
+        if action is not None:
+            return action
+        # No Giant in hand: cycle the cheapest card behind the king to bring it round.
+        return view.first_action(("Archer", "Knight", "Minions"), 1, 9) or (0, 0, 0)
+    return (0, 0, 0)
+
+
+class StackedPushOpponent:
+    """`stacked_push_strategy` with its thresholds redrawn every game, around the tuned values."""
+
+    __name__ = "randomized_stacked_push"
+
+    def __init__(self):
+        self.parameters = None
+
+    def reset(self):
+        rng = random.Random(random.getrandbits(64))
+        self.parameters = dict(defend=rng.choice((6, 7, 9, 99)), spell_threshold=rng.choice((2.0, 2.5)),
+                               weak_lane=rng.random() < 0.8)
+
+    def __call__(self, observation):
+        if self.parameters is None:
+            self.reset()
+        return stacked_push_strategy(observation, **self.parameters)
+
+
 ANTI_AIR = ("Archer", "Musketeer", "Minions", "Arrows", "Fireball")
 
 

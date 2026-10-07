@@ -72,8 +72,22 @@ function readEntity(entity) {
   };
 }
 
+// Spells and troop shots are LogicProjectile objects with no HP component, so
+// readEntity would skip them. Offsets from firstlight-cr's probe (same libg build).
+let projectileVtable = ptr(0);
+function readProjectile(entity) {
+  if (!p64(entity, 0).equals(projectileVtable)) return null;
+  return {
+    ptr: entity.toString(),
+    side_78: i32(entity, 0x78),
+    data_id_40: u32(p64(entity, 0x48), 0x40),   // LogicProjectileData global id
+    dest_x_120: i32(entity, 0x120),
+    dest_y_124: i32(entity, 0x124),
+  };
+}
+
 function readBattleEntities(hpState) {
-  if (hpState.isNull()) return { valid: false, entities: [] };
+  if (hpState.isNull()) return { valid: false, entities: [], projectiles: [] };
 
   // hpState+0x08 -> registry+0x40 -> collection. The collection stores its
   // pointer array at +0x08 and signed count at +0x14.
@@ -83,13 +97,16 @@ function readBattleEntities(hpState) {
   const count = i32(collection, 0x14);
 
   const entities = [];
+  const projectiles = [];
   for (let index = 0; index < count; index++) {
     const entity = p64(data, index * Process.pointerSize);
     if (entity.isNull()) continue;
+    const projectile = readProjectile(entity);
+    if (projectile !== null) { projectiles.push(projectile); continue; }
     const observation = readEntity(entity);
     if (observation !== null) entities.push(observation);
   }
-  return { valid: true, entities };
+  return { valid: true, entities, projectiles };
 }
 
 function readPlayerIdentity(manager) {
@@ -116,6 +133,7 @@ function readPlayerIdentity(manager) {
 setImmediate(function () {
   const module = Process.findModuleByName('libg.so');
   const base = module.base;
+  projectileVtable = base.add(0x189cc28);
 
   getManager = new NativeFunction(base.add(OFFSETS.getManager), 'pointer', []);
   getBattleObj = new NativeFunction(base.add(OFFSETS.getBattleObj), 'pointer', ['pointer']);
@@ -189,11 +207,15 @@ setImmediate(function () {
     let hpState = ptr(0);
     let upperKingHp = null;
     let lowerKingHp = null;
+    let elixirRaw = null;
     try {
       manager = getManager();
       hpState = getHpState(manager);
       upperKingHp = getTowerHp(hpState, 0);
       lowerKingHp = getTowerHp(hpState, 1);
+      // Exact elixir x10000 per roster player (queue_overlay: roster+0xe0/+0xe8 -> player+0x2f8).
+      const roster = p64(getBattleObj(manager), 0xa8);
+      elixirRaw = [i32(p64(roster, 0xe0), 0x2f8), i32(p64(roster, 0xe8), 0x2f8)];
     } catch (_) {
     }
 
@@ -205,10 +227,13 @@ setImmediate(function () {
       ui_state: uiState.toString(),
       hand_model: handModel.toString(),
       own_elixir_1e0: i32(uiState, 0x1e0),
+      elixir_raw_2f8: elixirRaw,      // [player 0, player 1] in roster order, /10000 = elixir
       battle_clock_220: f32(uiState, 0x220),
       hand,
       next_queue_count_23c: i32(handModel, 0x23c),
       next_queue_deck_index_230: i32(p64(handModel, 0x230), 0),
+      // Deck indices of the cards after the hand: next card, then the three after it.
+      queue_deck_indices_230: [0, 1, 2, 3].map((i) => i32(p64(handModel, 0x230), i * 4)),
       next_card_object: nextCardObject.toString(),
       next_card_data: nextCardData.toString(),
       next_card_data_id_40: i32(nextCardData, 0x40),
@@ -219,6 +244,7 @@ setImmediate(function () {
       lower_king_hp: lowerKingHp,
       entity_list_valid: entitySnapshot.valid,
       entities: entitySnapshot.entities,
+      projectiles: entitySnapshot.projectiles,
     });
   }, SNAPSHOT_INTERVAL_MS);
 

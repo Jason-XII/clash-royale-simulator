@@ -22,7 +22,7 @@ from stable_baselines3 import PPO
 from environment import Bank, BANK_TARGETS, CARD_SLOTS, CREnv, LIVE_PLAY_DELAY, entity_names, enemy_troops_in_half
 from masked_spatial import MEMORY_FRAMES, MaskedSpatialPolicy
 from parallel_rollout import ParallelPPO, ParallelVecEnv, VariableDiscountBuffer
-from strategies import DiverseOpponent, HumanStyleOpponent, STRATEGIES
+from strategies import DiverseOpponent, HumanStyleOpponent, StackedPushOpponent, STRATEGIES
 
 
 DEFAULT_GAMMA = 0.997
@@ -175,7 +175,7 @@ class ReflectedOpponent:
 def training_opponents():
     """The scripts sampled during learner training."""
     return [STRATEGIES[name] for name in ("defensive", "bridge", "split", "counterpush", "punish")] \
-        + [DiverseOpponent("deep_defense"), DiverseOpponent("counterpush"), HumanStyleOpponent()]
+        + [DiverseOpponent("deep_defense"), DiverseOpponent("counterpush"), HumanStyleOpponent(), StackedPushOpponent()]
 
 
 COUNTERPUSH_MIRRORED = "counterpush_mirrored"
